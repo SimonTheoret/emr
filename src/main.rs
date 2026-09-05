@@ -1,21 +1,24 @@
 use std::fmt::Debug;
+use tracing::{info, instrument};
 
 use axum::body::BodyDataStream;
+use axum::{
+    RequestExt, Router, extract::FromRequestParts, extract::Request, extract::State,
+    response::IntoResponse, routing::any,
+};
+use bytes::{Bytes, BytesMut};
 use eyre::{Context, Report as EyreReport, eyre};
+use futures::StreamExt;
+use http::{HeaderMap, HeaderValue, Method, StatusCode, Version, request::Parts};
+use http_body_util::BodyDataStream as HttpBodyDataStream;
 use reqwest::{Client, ClientBuilder};
+use tokio::{
+    sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    task::{spawn, spawn_blocking},
+};
 use url::Url;
 
-use axum::{
-    Router,
-    extract::{FromRequest, Request, State},
-    response::IntoResponse,
-    routing::any,
-};
-use http::{HeaderMap, HeaderValue, Method, StatusCode, Version, request::Parts};
-
 mod streaming;
-
-// const HEADERS_NAME_TO_FILTER: [&str; 1] = ["host"];
 
 #[derive(Debug, Clone)]
 struct MethodWrapper(Method);
@@ -27,6 +30,7 @@ struct HeadersMapWrapper(HeaderMap<HeaderValue>);
 struct UrlWrapper(Url);
 #[derive(Debug)]
 struct BodyWrapper(BodyDataStream);
+
 #[derive(Debug, Clone)]
 struct StatusCodeWrapper(StatusCode);
 
@@ -82,6 +86,9 @@ impl IntoResponse for Report {
 //     tslf: Duration,
 // }
 
+#[derive(Clone, Debug)]
+struct RequestSerializer(BytesMut);
+
 #[derive(Debug)]
 struct RawRequest {
     body: BodyWrapper,
@@ -89,6 +96,9 @@ struct RawRequest {
     version: VersionWrapper,
     headers: HeadersMapWrapper,
 }
+
+#[derive(Clone, Debug)]
+struct ResponseSerializer(BytesMut);
 
 #[derive(Debug)]
 struct RawResponse {
@@ -103,14 +113,19 @@ struct RawResponse {
 impl IntoResponse for RawResponse {
     fn into_response(self) -> axum::response::Response {
         let parts = self.parts;
-        println!("Les parties: {:?}", parts);
-        axum::response::Response::from_parts(parts, axum::body::Body::new(self.body.0))
+        // println!("Les parties: {:?}", parts);
+        axum::response::Response::from_parts(parts, axum::body::Body::from_stream(self.body.0))
     }
 }
 
-async fn send_request(req: RawRequest, state: AppState) -> Result<RawResponse> {
+async fn send_request(
+    req: RawRequest,
+    state: AppState,
+    channel: UnboundedSender<Bytes>,
+) -> Result<RawResponse> {
     let (client, config) = (state.client, state.config);
-    let new_req = client
+    // let builder = client.request(req.method.0, &config.destination);
+    let res = client
         .request(req.method.0, &config.destination)
         .headers(
             req.headers
@@ -121,13 +136,15 @@ async fn send_request(req: RawRequest, state: AppState) -> Result<RawResponse> {
         )
         .version(req.version.0)
         .body(reqwest::Body::wrap_stream(req.body.0))
-        .build()
-        .map_err(|e| Report(eyre!("Error when sending the request: {}", e)))?;
-    println!("Sending the following request:\n{:#?}", new_req);
-    let res = client
-        .execute(new_req)
+        .send()
         .await
         .wrap_err("Could not send the request")?;
+    // .map_err(|e| Report(eyre!("Error when sending the request: {}", e)))?;
+    // println!("Sending the following request:\n{:#?}", new_req);
+    // let res = client
+    //     .execute(new_req)
+    //     .await
+    //     .wrap_err("Could not send the request")?;
     let url = res.url().clone();
     let status = res.status();
     let res_http: http::Response<reqwest::Body> = res.into();
@@ -137,10 +154,23 @@ async fn send_request(req: RawRequest, state: AppState) -> Result<RawResponse> {
         version: VersionWrapper(parts.version),
         headers: HeadersMapWrapper(parts.headers.clone()),
         status: StatusCodeWrapper(status),
-        body: BodyWrapper(axum::body::Body::new(body).into_data_stream()),
+        body: BodyWrapper(
+            axum::body::Body::new(axum::body::Body::from_stream(
+                HttpBodyDataStream::new(body).map(move |b| match b {
+                    Err(e) => Err(e),
+                    Ok(bytes) => {
+                        channel
+                            .send(bytes.clone())
+                            .expect("Error when sending bytes over a channel (Sending request)");
+                        Ok(bytes)
+                    }
+                }),
+            ))
+            .into_data_stream(),
+        ),
         parts,
     };
-    println!("raw response: {:#?}", raw_res);
+    // println!("raw response: {:#?}", raw_res);
     Ok(raw_res)
 }
 
@@ -150,13 +180,11 @@ struct AppState {
     config: Config,
 }
 
-impl<S> FromRequest<S> for RawRequest
-where
-    S: Send + Sync,
-{
-    type Rejection = Report;
-
-    async fn from_request(req: axum::extract::Request, _state: &S) -> Result<Self> {
+impl RawRequest {
+    async fn from_request(
+        req: axum::extract::Request,
+        channel: UnboundedSender<Bytes>,
+    ) -> Result<Self> {
         let (parts, body_req) = req.into_parts();
 
         let Parts {
@@ -165,8 +193,18 @@ where
             headers,
             ..
         } = parts.clone();
-
-        let body = BodyWrapper(body_req.into_data_stream());
+        let body = BodyWrapper(
+            axum::body::Body::from_stream(body_req.into_data_stream().map(move |b| match b {
+                Err(e) => Err(e),
+                Ok(bytes) => {
+                    channel
+                        .send(bytes.clone())
+                        .expect("Error when sending bytes over a channel (Building request)");
+                    Ok(bytes)
+                }
+            }))
+            .into_data_stream(),
+        );
 
         Ok(RawRequest {
             body,
@@ -176,11 +214,73 @@ where
         })
     }
 }
+fn copy_parts_from_req(req: &Request) -> Result<Parts> {
+    let mut incomplete_builder = http::Request::builder()
+        .method(req.method().clone())
+        .uri(req.uri().clone())
+        .version(req.version().clone())
+        .extension(req.extensions().clone());
+    for (h_n, h_v) in req.headers().iter() {
+        incomplete_builder = incomplete_builder.header(h_n, h_v);
+    }
+    incomplete_builder
+        .body(())
+        .map(|r| {
+            let (parts, ()) = r.into_parts();
+            parts
+        })
+        .wrap_err_with(|| "Error when extracting the parts of a request")
+        .map_err(|err| Report(err))
+}
+
+fn copy_parts_from_res(req: &RawResponse) -> Result<Parts> {
+    let mut incomplete_builder = http::Response::builder()
+        .uri(req.uri().clone())
+        .version(req.version().clone())
+        .extension(req.extensions().clone());
+    for (h_n, h_v) in req.headers().iter() {
+        incomplete_builder = incomplete_builder.header(h_n, h_v);
+    }
+    incomplete_builder
+        .body(())
+        .map(|r| {
+            let (parts, ()) = r.into_parts();
+            parts
+        })
+        .wrap_err_with(|| "Error when extracting the parts of a request")
+        .map_err(|err| Report(err))
+}
+
+async fn serialize(parts: Parts, mut channel: UnboundedReceiver<Bytes>) {
+    let mut data = Vec::<u8>::with_capacity(2 >> 10);
+    while let Some(b) = channel.recv().await {
+        data.extend_from_slice(&b);
+    }
+    println!("Finished reading bytes:\n{:#?}", data);
+}
+
+#[instrument(skip(app_state))]
+async fn handle_request(State(app_state): State<AppState>, req: Request) -> RawResponse {
+    let (req_sender, req_recv) = unbounded_channel::<Bytes>();
+    let (res_sender, res_recv) = unbounded_channel::<Bytes>();
+    spawn(serialize(copy_parts_from_req(&req).unwrap(), req_recv));
+    let raw_req = RawRequest::from_request(req, req_sender)
+        .await
+        .expect("Error when extracting the request");
+    info!("Request constructed");
+    let res = send_request(raw_req, app_state, res_sender)
+        .await
+        .expect("Error when sending the request");
+    spawn(serialize(copy_parts_from_res(&res), res_recv));
+    res
+}
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt().init();
+    info!("Tracing subscriber initialized");
     let config = Config {
-        destination: "https://www.google.com".into(),
+        destination: "https://example.com".into(),
     };
     let client = ClientBuilder::new()
         .use_rustls_tls()
@@ -188,25 +288,11 @@ async fn main() {
         .build()
         .expect("could not build the Reqwest client");
     let state = AppState { client, config };
-    // build our application with a single route
     let app = Router::new()
         .route("/", any(handle_request))
         .route("/{*wildcard}", any(handle_request))
         .with_state(state);
 
-    // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
-}
-
-#[axum::debug_handler]
-async fn handle_request(State(app_state): State<AppState>, req: Request) -> RawResponse {
-    let raw_req = RawRequest::from_request(req, &())
-        .await
-        .expect("Error when extracting the request");
-    println!("{:#?}", raw_req);
-
-    send_request(raw_req, app_state)
-        .await
-        .expect("Error when sending the request")
 }
