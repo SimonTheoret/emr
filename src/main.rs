@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use axum::body::BodyDataStream;
 use eyre::{Context, Report as EyreReport, eyre};
 use reqwest::{Client, ClientBuilder};
@@ -12,6 +14,8 @@ use axum::{
 use http::{HeaderMap, HeaderValue, Method, StatusCode, Version, request::Parts};
 
 mod streaming;
+
+// const HEADERS_NAME_TO_FILTER: [&str; 1] = ["host"];
 
 #[derive(Debug, Clone)]
 struct MethodWrapper(Method);
@@ -108,11 +112,18 @@ async fn send_request(req: RawRequest, state: AppState) -> Result<RawResponse> {
     let (client, config) = (state.client, state.config);
     let new_req = client
         .request(req.method.0, &config.destination)
-        .headers(req.headers.0)
+        .headers(
+            req.headers
+                .0
+                .into_iter()
+                .map(|(opt_h, v)| (opt_h.unwrap(), v))
+                .collect(),
+        )
         .version(req.version.0)
         .body(reqwest::Body::wrap_stream(req.body.0))
         .build()
         .map_err(|e| Report(eyre!("Error when sending the request: {}", e)))?;
+    println!("Sending the following request:\n{:#?}", new_req);
     let res = client
         .execute(new_req)
         .await
@@ -172,6 +183,8 @@ async fn main() {
         destination: "https://www.google.com".into(),
     };
     let client = ClientBuilder::new()
+        .use_rustls_tls()
+        .user_agent("erm")
         .build()
         .expect("could not build the Reqwest client");
     let state = AppState { client, config };
