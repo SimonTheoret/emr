@@ -1,10 +1,11 @@
 use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use std::time::{Duration, Instant};
 use tracing::{info, instrument};
 
 use axum::{Router, extract::Request, extract::State, response::IntoResponse, routing::any};
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use eyre::{Context, Report as EyreReport};
 use futures::StreamExt;
 use http::{HeaderMap, request::Parts};
@@ -18,6 +19,8 @@ use tokio::{
 
 mod ir;
 use crate::ir::{BodyStream, HeadersIR, MethodIR, StatusCodeIR, UrlIR, VersionIR};
+
+type Delay = Duration;
 
 #[derive(Debug)]
 struct Report(EyreReport);
@@ -40,36 +43,13 @@ impl IntoResponse for Report {
     }
 }
 
-// async fn extract_time_frames(res: Response) -> Result<Vec<TimedFrame>> {
-//     let mut stream = res.bytes_stream();
-//     let (l, opt_u) = stream.size_hint();
-//     let capacity = opt_u.unwrap_or_else(|| 2 * l);
-//     let mut acc = Vec::with_capacity(capacity);
-//     // 1 and 2 make it such that the first tslf is 0.0
-//     let mut last_frame_instant: Option<Instant> = None; // 1
-//     while let Some(r_frame) = stream.next().await {
-//         let now = Instant::now();
-//         let tslf = now - last_frame_instant.unwrap_or(now); // 2
-//         last_frame_instant = Some(now);
-//         let frame = match r_frame {
-//             Ok(f) => f,
-//             Err(e) => return Err(Report(eyre!("Error when receiving frame: {}", e))),
-//         };
-//         acc.push(TimedFrame {
-//             content: frame,
-//             tslf,
-//         });
-//     }
-//     Ok(acc)
-// }
-
-// #[derive(Debug, Clone)]
-// struct TimedFrame {
-//     /// The content of the frame
-//     content: Bytes,
-//     /// Time since last frame (ms)
-//     tslf: Duration,
-// }
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct TimedFrame {
+    /// The content of the frame
+    content: Bytes,
+    /// Time since last frame (ms)
+    tslf: Delay,
+}
 
 #[derive(Debug)]
 struct ERMRequest {
@@ -127,12 +107,12 @@ struct ERMResponseParts {
 #[derive(Serialize, Deserialize)]
 struct FinalResponse {
     parts: ERMResponseParts,
-    body: BytesMut,
+    body: Vec<TimedFrame>,
 }
 #[derive(Serialize, Deserialize)]
 struct FinalRequest {
     parts: ERMRequestParts,
-    body: BytesMut,
+    body: Vec<TimedFrame>,
 }
 
 impl IntoResponse for ERMResponse {
@@ -154,7 +134,7 @@ impl IntoResponse for ERMResponse {
 async fn send_request(
     req: ERMRequest,
     state: AppState,
-    channel: UnboundedSender<Bytes>,
+    channel: UnboundedSender<TimedFrame>,
 ) -> Result<ERMResponse> {
     let (client, config) = (state.client, state.config);
     let res = client
@@ -169,6 +149,7 @@ async fn send_request(
     let status = res.status();
     let res_http: http::Response<reqwest::Body> = res.into();
     let (parts, body) = res_http.into_parts();
+    let mut last_frame_time: Option<Instant> = None;
     let raw_res = ERMResponse {
         url: UrlIR(url),
         version: VersionIR::from(parts.version),
@@ -179,9 +160,14 @@ async fn send_request(
                 HttpBodyDataStream::new(body).map(move |b| match b {
                     Err(e) => Err(e),
                     Ok(bytes) => {
+                        let now = Instant::now();
                         channel
-                            .send(bytes.clone())
+                            .send(TimedFrame {
+                                content: bytes.clone(),
+                                tslf: now - last_frame_time.unwrap_or(now),
+                            })
                             .expect("Error when sending bytes over a channel (Sending request)");
+                        last_frame_time = Some(now);
                         Ok(bytes)
                     }
                 }),
@@ -201,7 +187,7 @@ struct AppState {
 impl ERMRequest {
     async fn from_request(
         req: axum::extract::Request,
-        channel: UnboundedSender<Bytes>,
+        channel: UnboundedSender<TimedFrame>,
     ) -> Result<Self> {
         let (parts, body_req) = req.into_parts();
 
@@ -211,13 +197,19 @@ impl ERMRequest {
             headers,
             ..
         } = parts.clone();
+        let mut last_frame_time: Option<Instant> = None;
         let body = BodyStream(
             axum::body::Body::from_stream(body_req.into_data_stream().map(move |b| match b {
                 Err(e) => Err(e),
                 Ok(bytes) => {
+                    let now = Instant::now();
                     channel
-                        .send(bytes.clone())
+                        .send(TimedFrame {
+                            content: bytes.clone(),
+                            tslf: now - last_frame_time.unwrap_or(now),
+                        })
                         .expect("Error when sending bytes over a channel (Building request)");
+                    last_frame_time = Some(now);
                     Ok(bytes)
                 }
             }))
@@ -233,23 +225,21 @@ impl ERMRequest {
     }
 }
 
-async fn serialize_response(parts: ERMResponseParts, mut channel: UnboundedReceiver<Bytes>) {
-    let mut data = BytesMut::new();
-    while let Some(b) = channel.recv().await {
-        data.extend_from_slice(&b);
+async fn serialize_response(parts: ERMResponseParts, mut channel: UnboundedReceiver<TimedFrame>) {
+    let mut data = Vec::with_capacity(1 << 5);
+    while let Some(tf) = channel.recv().await {
+        data.push(tf);
     }
-    println!("Finished reading bytes:\n{:#?}", data);
     let ser_res = FinalResponse { parts, body: data };
     let content = ron::ser::to_string_pretty(&ser_res, PrettyConfig::default()).unwrap();
     std::fs::write("serialized_response.ron", content).unwrap();
 }
 
-async fn serialize_request(parts: ERMRequestParts, mut channel: UnboundedReceiver<Bytes>) {
-    let mut data = BytesMut::new();
-    while let Some(b) = channel.recv().await {
-        data.extend_from_slice(&b);
+async fn serialize_request(parts: ERMRequestParts, mut channel: UnboundedReceiver<TimedFrame>) {
+    let mut data = Vec::with_capacity(1 << 5);
+    while let Some(tf) = channel.recv().await {
+        data.push(tf);
     }
-    println!("Finished reading bytes:\n{:#?}", data);
     let ser_res = FinalRequest { parts, body: data };
     let content = ron::ser::to_string_pretty(&ser_res, PrettyConfig::default()).unwrap();
     std::fs::write("serialized_request.ron", content).unwrap();
@@ -257,8 +247,9 @@ async fn serialize_request(parts: ERMRequestParts, mut channel: UnboundedReceive
 
 #[instrument(skip(app_state))]
 async fn handle_request(State(app_state): State<AppState>, req: Request) -> ERMResponse {
-    let (req_sender, req_recv) = unbounded_channel::<Bytes>();
-    let (res_sender, res_recv) = unbounded_channel::<Bytes>();
+    let (req_sender, req_recv) = unbounded_channel::<TimedFrame>();
+    let (res_sender, res_recv) = unbounded_channel::<TimedFrame>();
+
     spawn(serialize_request(
         ERMRequestParts::clone_from_request(&req),
         req_recv,
@@ -266,7 +257,6 @@ async fn handle_request(State(app_state): State<AppState>, req: Request) -> ERMR
     let raw_req = ERMRequest::from_request(req, req_sender)
         .await
         .expect("Error when extracting the request");
-    info!("Request constructed");
     let res = send_request(raw_req, app_state, res_sender)
         .await
         .expect("Error when sending the request");

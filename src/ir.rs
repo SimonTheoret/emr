@@ -114,7 +114,7 @@ pub struct HeadersIR(pub Vec<(HeaderNameIR, HeaderValueIR)>);
 
 impl From<HeaderMap> for HeadersIR {
     fn from(value: HeaderMap) -> Self {
-        let mut vec = Vec::with_capacity(2 << 5);
+        let mut vec = Vec::with_capacity(1 << 5);
         let mut last_name: Option<HeaderName> = None;
         for (opt_name, value) in value.into_iter() {
             let v = Bytes::from_owner(value);
@@ -135,7 +135,7 @@ impl From<HeaderMap> for HeadersIR {
 
 impl From<HeadersIR> for HeaderMap {
     fn from(value: HeadersIR) -> Self {
-        let mut map = HeaderMap::with_capacity(2 << 5);
+        let mut map = HeaderMap::with_capacity(1 << 5);
         for (n, v) in value.0.into_iter() {
             let name = HeaderName::from_bytes(&n).unwrap();
             let value = HeaderValue::from_bytes(&v).unwrap();
@@ -147,6 +147,12 @@ impl From<HeadersIR> for HeaderMap {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UrlIR(pub Url);
+
+impl From<Url> for UrlIR {
+    fn from(value: Url) -> Self {
+        Self(value)
+    }
+}
 
 #[derive(Debug)]
 pub struct BodyStream(pub BodyDataStream);
