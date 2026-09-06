@@ -1,12 +1,13 @@
+use axum::{body::BodyDataStream, extract::Request, response::IntoResponse};
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, num::NonZeroU16};
-
-use axum::body::BodyDataStream;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Version};
+use serde::{Deserialize, Serialize};
+use std::{fmt::Debug, num::NonZeroU16, time::Duration};
 use url::Url;
+use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+type Delay = Duration;
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MethodIR {
     Options,
     #[default]
@@ -66,7 +67,7 @@ impl From<MethodIR> for Method {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Copy, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Serialize, Deserialize, Copy, Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub enum VersionIR {
     Http09,
     Http10,
@@ -109,7 +110,7 @@ impl From<VersionIR> for Version {
 type HeaderNameIR = Bytes;
 type HeaderValueIR = Bytes;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HeadersIR(pub Vec<(HeaderNameIR, HeaderValueIR)>);
 
 impl From<HeaderMap> for HeadersIR {
@@ -145,7 +146,7 @@ impl From<HeadersIR> for HeaderMap {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UrlIR(pub Url);
 
 impl From<Url> for UrlIR {
@@ -170,4 +171,103 @@ impl From<StatusCodeIR> for StatusCode {
     fn from(value: StatusCodeIR) -> Self {
         StatusCode::from_u16(u16::from(value.0)).unwrap()
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TimedFrame {
+    /// The content of the frame
+    pub content: Bytes,
+    /// Time since last frame (ms)
+    pub tslf: Delay,
+}
+
+#[derive(Debug)]
+pub struct ERMRequest {
+    pub body: BodyStream,
+    pub method: MethodIR,
+    pub version: VersionIR,
+    pub headers: HeadersIR,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ERMRequestParts {
+    pub method: MethodIR,
+    pub version: VersionIR,
+    pub headers: HeadersIR,
+    pub id: Uuid,
+}
+
+impl ERMRequestParts {
+    pub fn clone_from_request(req: &Request, id: Uuid) -> Self {
+        Self {
+            method: req.method().clone().into(),
+            version: req.version().into(),
+            headers: req.headers().clone().into(),
+            id,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ERMResponse {
+    pub body: BodyStream,
+    pub url: UrlIR,
+    pub version: VersionIR,
+    pub headers: HeadersIR,
+    pub status: StatusCodeIR,
+    pub id: Uuid,
+}
+
+impl ERMResponse {
+    pub fn clone_parts(&self) -> ERMResponseParts {
+        ERMResponseParts {
+            url: self.url.clone(),
+            version: self.version,
+            headers: self.headers.clone(),
+            status: self.status,
+            id: self.id,
+        }
+    }
+}
+
+impl IntoResponse for ERMResponse {
+    fn into_response(self) -> axum::response::Response {
+        let mut incomplete_resp = axum::response::Response::builder()
+            .status(self.status)
+            .version(self.version.into());
+        let empty_headers = incomplete_resp
+            .headers_mut()
+            .expect("Error when fetching the headers from ERMResponse");
+        let current_headers: HeaderMap = self.headers.into();
+        empty_headers.extend(current_headers);
+        incomplete_resp
+            .body(axum::body::Body::from_stream(self.body.0))
+            .expect("Error when building a response")
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ERMResponseParts {
+    pub url: UrlIR,
+    pub version: VersionIR,
+    pub headers: HeadersIR,
+    pub status: StatusCodeIR,
+    pub id: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FinalResponse {
+    pub parts: ERMResponseParts,
+    pub body: Vec<TimedFrame>,
+}
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FinalRequest {
+    pub parts: ERMRequestParts,
+    pub body: Vec<TimedFrame>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Mock {
+    Request(FinalRequest),
+    Response(FinalResponse),
 }
