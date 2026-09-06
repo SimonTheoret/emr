@@ -2,3 +2,4 @@
 /.direnv
 /.envrc
 **/*.drawio.bkp
+**/*.ron
