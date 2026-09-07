@@ -10,7 +10,6 @@ use uuid::Uuid;
 use axum::{Router, extract::Request, extract::State, routing::any};
 use eyre::{Context, Result};
 use futures::StreamExt;
-use http::request::Parts;
 use http_body_util::BodyDataStream as HttpBodyDataStream;
 
 use reqwest::{Client, ClientBuilder};
@@ -24,7 +23,7 @@ mod storage;
 use crate::{
     ir::{
         BodyStream, ERMRequest, ERMRequestParts, ERMResponse, ERMResponseParts, FinalRequest,
-        FinalResponse, HeadersIR, MethodIR, Mock, StatusCodeIR, TimedFrame, UrlIR, VersionIR,
+        FinalResponse, HeadersIR, Mock, StatusCodeIR, TimedFrame, UrlIR, VersionIR,
     },
     storage::MockFileStorage,
 };
@@ -90,47 +89,6 @@ struct AppState {
     client: Client,
     config: Config,
     storage: Arc<Mutex<MockFileStorage>>,
-}
-
-impl ERMRequest {
-    async fn from_request(
-        req: axum::extract::Request,
-        channel: UnboundedSender<TimedFrame>,
-    ) -> Result<Self> {
-        let (parts, body_req) = req.into_parts();
-
-        let Parts {
-            method,
-            version,
-            headers,
-            ..
-        } = parts.clone();
-        let mut last_frame_time: Option<Instant> = None;
-        let body = BodyStream(
-            axum::body::Body::from_stream(body_req.into_data_stream().map(move |b| match b {
-                Err(e) => Err(e),
-                Ok(bytes) => {
-                    let now = Instant::now();
-                    channel
-                        .send(TimedFrame {
-                            content: bytes.clone(),
-                            tslf: now - last_frame_time.unwrap_or(now),
-                        })
-                        .expect("Error when sending bytes over a channel (Building request)");
-                    last_frame_time = Some(now);
-                    Ok(bytes)
-                }
-            }))
-            .into_data_stream(),
-        );
-
-        Ok(ERMRequest {
-            body,
-            method: MethodIR::from(method),
-            version: VersionIR::from(version),
-            headers: HeadersIR::from(headers),
-        })
-    }
 }
 
 async fn serialize_response(

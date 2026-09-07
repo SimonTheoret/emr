@@ -1,10 +1,17 @@
 use axum::{body::BodyDataStream, extract::Request, response::IntoResponse};
+use std::time::Instant;
+use uuid::Uuid;
+
+use eyre::Result;
+use futures::StreamExt;
+use http::request::Parts;
+
 use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Version};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, num::NonZeroU16, time::Duration};
+use tokio::sync::mpsc::UnboundedSender;
 use url::Url;
-use uuid::Uuid;
 
 type Delay = Duration;
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -189,6 +196,46 @@ pub struct ERMRequest {
     pub headers: HeadersIR,
 }
 
+impl ERMRequest {
+    pub async fn from_request(
+        req: axum::extract::Request,
+        channel: UnboundedSender<TimedFrame>,
+    ) -> Result<Self> {
+        let (parts, body_req) = req.into_parts();
+
+        let Parts {
+            method,
+            version,
+            headers,
+            ..
+        } = parts.clone();
+        let mut last_frame_time: Option<Instant> = None;
+        let body = BodyStream(
+            axum::body::Body::from_stream(body_req.into_data_stream().map(move |b| match b {
+                Err(e) => Err(e),
+                Ok(bytes) => {
+                    let now = Instant::now();
+                    channel
+                        .send(TimedFrame {
+                            content: bytes.clone(),
+                            tslf: now - last_frame_time.unwrap_or(now),
+                        })
+                        .expect("Error when sending bytes over a channel (Building request)");
+                    last_frame_time = Some(now);
+                    Ok(bytes)
+                }
+            }))
+            .into_data_stream(),
+        );
+
+        Ok(ERMRequest {
+            body,
+            method: MethodIR::from(method),
+            version: VersionIR::from(version),
+            headers: HeadersIR::from(headers),
+        })
+    }
+}
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ERMRequestParts {
     pub method: MethodIR,
