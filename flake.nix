@@ -9,6 +9,7 @@
 
   outputs =
     {
+      self,
       nixpkgs,
       rust-overlay,
       flake-utils,
@@ -17,6 +18,9 @@
     flake-utils.lib.eachDefaultSystem (
       system:
       let
+
+        name = "erm";
+        version = "0.1.0";
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
         rust = pkgs.rust-bin.stable.latest.default.override {
@@ -28,6 +32,37 @@
         };
       in
       {
+        packages.default = pkgs.pkgsStatic.rustPlatform.buildRustPackage (finalAttrs: {
+          pname = "${name}";
+          version = "${version}";
+          src = ./.;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+          };
+          postInstall = ''
+            ${pkgs.binutils}/bin/strip $out/bin/erm
+          '';
+          meta = {
+            description = "Record and replay proxy";
+            license = pkgs.lib.licenses.mit;
+            maintainers = [ "simon.theoret99@gmail.com" ];
+          };
+        });
+
+        packages.dockerImage = pkgs.pkgsStatic.dockerTools.buildLayeredImage {
+          name = "${name}";
+          tag = "${version}";
+          contents = [
+            pkgs.dockerTools.caCertificates
+          ];
+
+          config = {
+            Cmd = [
+              "${self.packages.${system}.default}/bin/erm"
+            ];
+          };
+        };
+
         devShells.default = pkgs.mkShell {
           buildInputs = [
             rust

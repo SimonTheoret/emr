@@ -4,3 +4,4 @@
 **/*.drawio.bkp
 **/*.ron
 **/*.drawio.dtmp
+/result
