@@ -18,6 +18,7 @@ use tokio::{
     task::spawn,
 };
 
+mod cli;
 mod ir;
 mod storage;
 use crate::{

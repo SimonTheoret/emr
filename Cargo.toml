@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 axum = { version = "0.8.9", features = ["macros"] }
 bytes = { version = "1.12.1", features = ["serde"] }
+clap = { version = "4.6.6", features = ["derive"] }
 dir_walker = "0.1.9"
 eyre = "0.6.14"
 futures = "0.3.34"
