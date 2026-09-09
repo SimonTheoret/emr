@@ -29,11 +29,12 @@ use crate::{
     storage::MockFileStorage,
 };
 
+const SERIALIZATION_EXTENSION: &str = "ron";
+
 #[derive(Clone)]
 struct Config {
     destination: String,
     mock_dir: PathBuf,
-    serialization_extension: String,
 }
 
 async fn send_request(
@@ -159,10 +160,9 @@ async fn main() {
     let config = Config {
         destination: "https://example.com".into(),
         mock_dir: PathBuf::from("mocks"),
-        serialization_extension: String::from("ron"),
     };
     let storage = Arc::new(Mutex::new(
-        MockFileStorage::new(&config.mock_dir, config.serialization_extension.clone())
+        MockFileStorage::new(&config.mock_dir, SERIALIZATION_EXTENSION)
             .expect("Error when creating the storage"),
     ));
     let client = ClientBuilder::new()

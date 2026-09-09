@@ -15,20 +15,21 @@ use crate::ir::Mock;
 trait SendWatcher: Watcher + Send {}
 impl<W> SendWatcher for W where W: Watcher + Send {}
 
-/// It is possible to have a racing condition around the filesystem. For example, if a user delete a
-/// file and (quickly) recreate the same file, it is possible we have processed a request before it
-/// has terminated
+/// It is possible to have a racing condition around the filesystem. For
+/// example, if a user delete a file and (quickly) recreate the same file, it is
+/// possible we have processed a request before the file is created.
+/// Time of Check to Time of Use (TOCTOU)
 pub struct MockFileStorage {
     dir: PathBuf,
     mocks: HashMap<PathBuf, Mock>,
     events_rx: Receiver<EventResult<Event>>,
-    serialization_ext: String,
+    serialization_ext: &'static str,
     /// We keep the watcher inside the storage to avoid it from being dropped.
     _watcher: Box<dyn SendWatcher>,
 }
 
 impl MockFileStorage {
-    pub fn new<P: Into<PathBuf>>(mock_dir: P, serialization_ext: String) -> Result<Self> {
+    pub fn new<P: Into<PathBuf>>(mock_dir: P, serialization_ext: &'static str) -> Result<Self> {
         let dir = mock_dir.into();
         if !dir.exists() {
             std::fs::create_dir(&dir)?;
@@ -37,7 +38,7 @@ impl MockFileStorage {
         let mut watcher =
             recommended_watcher(tx).wrap_err_with(|| "Error when creating the watcher")?;
         watcher.watch(dir.as_path(), notify::RecursiveMode::Recursive)?;
-        let files = Self::load_all_files(&dir, serialization_ext.as_str())?;
+        let files = Self::load_all_files(&dir, serialization_ext)?;
         info!("Storage backend initialized");
         Ok(Self {
             dir,
@@ -85,7 +86,7 @@ impl MockFileStorage {
     }
     fn reload_all_mocks(&mut self) -> Result<()> {
         info!("Need to reload all mock from storage");
-        let mocks = Self::load_all_files(self.dir.as_path(), self.serialization_ext.as_str())?;
+        let mocks = Self::load_all_files(self.dir.as_path(), self.serialization_ext)?;
         self.mocks = mocks;
         Ok(())
     }
