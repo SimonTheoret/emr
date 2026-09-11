@@ -99,32 +99,34 @@ async fn serialize_response(
     parts: ERMResponseParts,
     mut channel: UnboundedReceiver<TimedFrame>,
     mut dir: PathBuf,
-) {
+) -> Result<()> {
     let id = parts.id;
     let mut data = Vec::with_capacity(1 << 5);
     while let Some(tf) = channel.recv().await {
         data.push(tf);
     }
     let ser_res = Mock::Response(FinalResponse { parts, body: data });
-    let content = ron::ser::to_string_pretty(&ser_res, PrettyConfig::default()).unwrap();
+    let content = ron::ser::to_string_pretty(&ser_res, PrettyConfig::default())?;
     dir.push(format!("response_{}.ron", id.clone()));
-    std::fs::write(dir, content).unwrap();
+    std::fs::write(dir, content)?;
+    Ok(())
 }
 
 async fn serialize_request(
     parts: ERMRequestParts,
     mut channel: UnboundedReceiver<TimedFrame>,
     mut dir: PathBuf,
-) {
+) -> Result<()> {
     let id = parts.id;
     let mut data = Vec::with_capacity(1 << 5);
     while let Some(tf) = channel.recv().await {
         data.push(tf);
     }
     let ser_res = Mock::Request(FinalRequest { parts, body: data });
-    let content = ron::ser::to_string_pretty(&ser_res, PrettyConfig::default()).unwrap();
+    let content = ron::ser::to_string_pretty(&ser_res, PrettyConfig::default())?;
     dir.push(format!("request_{}.ron", id.clone()));
-    std::fs::write(dir, content).unwrap();
+    std::fs::write(dir, content)?;
+    Ok(())
 }
 
 #[instrument(skip(app_state))]

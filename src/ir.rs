@@ -180,7 +180,7 @@ impl From<StatusCodeIR> for StatusCode {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TimedFrame {
     /// The content of the frame
     pub content: Bytes,
@@ -236,7 +236,7 @@ impl ERMRequest {
         })
     }
 }
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ERMRequestParts {
     pub method: MethodIR,
     pub version: VersionIR,
@@ -293,7 +293,7 @@ impl IntoResponse for ERMResponse {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ERMResponseParts {
     pub url: UrlIR,
     pub version: VersionIR,
@@ -317,4 +317,121 @@ pub struct FinalRequest {
 pub enum Mock {
     Request(FinalRequest),
     Response(FinalResponse),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::num::NonZeroU16;
+
+    fn bytes_strategy() -> impl Strategy<Value = Bytes> {
+        prop::collection::vec(any::<u8>(), 0..64).prop_map(Bytes::from)
+    }
+
+    fn headers_strategy() -> impl Strategy<Value = HeadersIR> {
+        prop::collection::vec((bytes_strategy(), bytes_strategy()), 0..32).prop_map(HeadersIR)
+    }
+
+    fn url_strategy() -> impl Strategy<Value = UrlIR> {
+        (0_u16..1000)
+            .prop_map(|id| UrlIR(Url::parse(&format!("https://example.test/{id}")).unwrap()))
+    }
+
+    fn status_strategy() -> impl Strategy<Value = StatusCodeIR> {
+        (100_u16..=599).prop_map(|code| StatusCodeIR(NonZeroU16::new(code).unwrap()))
+    }
+
+    fn uuid_strategy() -> impl Strategy<Value = Uuid> {
+        any::<u128>().prop_map(Uuid::from_u128)
+    }
+
+    fn method_strategy() -> impl Strategy<Value = MethodIR> {
+        prop_oneof![
+            Just(MethodIR::Options),
+            Just(MethodIR::Get),
+            Just(MethodIR::Post),
+            Just(MethodIR::Put),
+            Just(MethodIR::Delete),
+            Just(MethodIR::Head),
+            Just(MethodIR::Trace),
+            Just(MethodIR::Connect),
+            Just(MethodIR::Patch),
+            Just(MethodIR::Query),
+        ]
+    }
+
+    fn version_strategy() -> impl Strategy<Value = VersionIR> {
+        prop_oneof![
+            Just(VersionIR::Http09),
+            Just(VersionIR::Http10),
+            Just(VersionIR::Http11),
+            Just(VersionIR::Http2),
+            Just(VersionIR::Http3),
+        ]
+    }
+
+    fn timed_frame_strategy() -> impl Strategy<Value = TimedFrame> {
+        (bytes_strategy(), 0_u64..=60_000).prop_map(|(content, millis)| TimedFrame {
+            content,
+            tslf: Duration::from_millis(millis),
+        })
+    }
+
+    fn request_parts_strategy() -> impl Strategy<Value = ERMRequestParts> {
+        (
+            method_strategy(),
+            version_strategy(),
+            headers_strategy(),
+            uuid_strategy(),
+        )
+            .prop_map(|(method, version, headers, id)| ERMRequestParts {
+                method,
+                version,
+                headers,
+                id,
+            })
+    }
+
+    fn response_parts_strategy() -> impl Strategy<Value = ERMResponseParts> {
+        (
+            url_strategy(),
+            version_strategy(),
+            headers_strategy(),
+            status_strategy(),
+            uuid_strategy(),
+        )
+            .prop_map(|(url, version, headers, status, id)| ERMResponseParts {
+                url,
+                version,
+                headers,
+                status,
+                id,
+            })
+    }
+
+    fn mock_strategy() -> impl Strategy<Value = Mock> {
+        prop_oneof![
+            (
+                request_parts_strategy(),
+                prop::collection::vec(timed_frame_strategy(), 0..8)
+            )
+                .prop_map(|(parts, body)| Mock::Request(FinalRequest { parts, body })),
+            (
+                response_parts_strategy(),
+                prop::collection::vec(timed_frame_strategy(), 0..8)
+            )
+                .prop_map(|(parts, body)| Mock::Response(FinalResponse { parts, body })),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn mock_round_trips_through_ron(mock in mock_strategy()) {
+            let serialized = ron::ser::to_string_pretty(&mock, ron::ser::PrettyConfig::default()).unwrap();
+            let deserialized: Mock = ron::from_str(&serialized).unwrap();
+
+            prop_assert_eq!(deserialized, mock);
+        }
+    }
 }
