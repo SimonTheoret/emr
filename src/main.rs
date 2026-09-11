@@ -160,8 +160,8 @@ async fn handle_request(State(app_state): State<AppState>, req: Request) -> ERMR
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt().init();
-    info!("Tracing subscriber initialized");
     let args = Args::parse();
+    info!("Tracing subscriber initialized");
     let config = Config {
         destination: args.destination,
         mock_dir: args.mock_dir,
