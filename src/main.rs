@@ -1,3 +1,4 @@
+use clap::Parser;
 use ron::ser::PrettyConfig;
 use std::{
     path::PathBuf,
@@ -22,6 +23,7 @@ mod cli;
 mod ir;
 mod storage;
 use crate::{
+    cli::Args,
     ir::{
         BodyStream, ERMRequest, ERMRequestParts, ERMResponse, ERMResponseParts, FinalRequest,
         FinalResponse, HeadersIR, Mock, StatusCodeIR, TimedFrame, UrlIR, VersionIR,
@@ -157,9 +159,10 @@ async fn handle_request(State(app_state): State<AppState>, req: Request) -> ERMR
 async fn main() {
     tracing_subscriber::fmt().init();
     info!("Tracing subscriber initialized");
+    let args = Args::parse();
     let config = Config {
-        destination: "https://example.com".into(),
-        mock_dir: PathBuf::from("mocks"),
+        destination: args.destination,
+        mock_dir: args.mock_dir,
     };
     let storage = Arc::new(Mutex::new(
         MockFileStorage::new(&config.mock_dir, SERIALIZATION_EXTENSION)
@@ -181,6 +184,8 @@ async fn main() {
         .route("/{*wildcard}", any(handle_request))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port))
+        .await
+        .unwrap();
     axum::serve(listener, app).await.unwrap();
 }
