@@ -1,14 +1,14 @@
 use axum::{body::BodyDataStream, extract::Request, response::IntoResponse};
-use std::time::Instant;
+use std::{cmp::Ordering, time::Instant};
 use uuid::Uuid;
 
 use eyre::Result;
 use futures::StreamExt;
-use http::request::Parts;
+use http::{Uri, request::Parts};
 
 use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Version};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
 use std::{fmt::Debug, num::NonZeroU16, time::Duration};
 use tokio::sync::mpsc::UnboundedSender;
 use url::Url;
@@ -162,6 +162,51 @@ impl From<Url> for UrlIR {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UriIR(pub Uri);
+
+impl Serialize for UriIR {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.to_string().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for UriIR {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let uri = String::deserialize(deserializer)?;
+        uri.parse::<Uri>().map(UriIR).map_err(D::Error::custom)
+    }
+}
+
+impl PartialOrd for UriIR {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for UriIR {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.to_string().cmp(&other.0.to_string())
+    }
+}
+
+impl From<UriIR> for Uri {
+    fn from(value: UriIR) -> Self {
+        value.0
+    }
+}
+impl From<Uri> for UriIR {
+    fn from(value: Uri) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Debug)]
 pub struct BodyStream(pub BodyDataStream);
 
@@ -241,6 +286,7 @@ pub struct ERMRequestParts {
     pub method: MethodIR,
     pub version: VersionIR,
     pub headers: HeadersIR,
+    pub uri: UriIR,
     pub id: Uuid,
 }
 
@@ -250,6 +296,7 @@ impl ERMRequestParts {
             method: req.method().clone().into(),
             version: req.version().into(),
             headers: req.headers().clone().into(),
+            uri: UriIR(req.uri().clone()),
             id,
         }
     }
@@ -338,6 +385,10 @@ mod tests {
             .prop_map(|id| UrlIR(Url::parse(&format!("https://example.test/{id}")).unwrap()))
     }
 
+    fn uri_strategy() -> impl Strategy<Value = UriIR> {
+        (0_u16..1000).prop_map(|id| UriIR(format!("/resource/{id}?q={id}").parse().unwrap()))
+    }
+
     fn status_strategy() -> impl Strategy<Value = StatusCodeIR> {
         (100_u16..=599).prop_map(|code| StatusCodeIR(NonZeroU16::new(code).unwrap()))
     }
@@ -383,12 +434,14 @@ mod tests {
             method_strategy(),
             version_strategy(),
             headers_strategy(),
+            uri_strategy(),
             uuid_strategy(),
         )
-            .prop_map(|(method, version, headers, id)| ERMRequestParts {
+            .prop_map(|(method, version, headers, uri, id)| ERMRequestParts {
                 method,
                 version,
                 headers,
+                uri,
                 id,
             })
     }
