@@ -21,6 +21,7 @@ use tokio::{
 
 mod cli;
 mod ir;
+pub mod matching;
 mod storage;
 use crate::{
     cli::Args,
@@ -151,7 +152,7 @@ async fn handle_request(State(app_state): State<AppState>, req: Request) -> ERMR
     spawn(serialize_response(res.clone_parts(), res_recv, mock_dir));
     let mut guard = storage.lock().unwrap();
     let files = guard
-        .files()
+        .mocks()
         .expect("Error when reading the files from the storage");
     info!("Files: {:#?}", files);
     res

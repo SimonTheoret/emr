@@ -48,7 +48,7 @@ impl MockFileStorage {
             _watcher: Box::new(watcher),
         })
     }
-    pub fn files(&mut self) -> Result<&HashMap<PathBuf, Mock>> {
+    pub fn mocks(&mut self) -> Result<&HashMap<PathBuf, Mock>> {
         let events: Vec<_> = self.events_rx.try_iter().collect();
         for ev in events {
             match ev {

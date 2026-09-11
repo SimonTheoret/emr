@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 25c89e187634d8d8ff6c842c5d90c841e27086d78addb05f5c72f497a85dffee # shrinks to mock = Request(FinalRequest { parts: ERMRequestParts { method: Options, version: Http09, headers: HeadersIR([(HeaderNameIR(b""), b"")]), uri: UriIR(/resource/0?q=0), id: 00000000-0000-0000-0000-000000000000 }, body: [] })

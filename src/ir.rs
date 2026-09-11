@@ -114,8 +114,46 @@ impl From<VersionIR> for Version {
     }
 }
 
-type HeaderNameIR = Bytes;
-type HeaderValueIR = Bytes;
+/// This types is a representation of the headers name. They are always
+/// represented as lowercase.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(from = "Bytes")]
+#[serde(into = "Bytes")]
+pub struct HeaderNameIR(Bytes);
+
+impl HeaderNameIR {
+    pub fn new(bytes: Bytes) -> Self {
+        Self(Bytes::copy_from_slice(&bytes.to_ascii_lowercase()))
+    }
+}
+impl From<HeaderName> for HeaderNameIR {
+    fn from(value: HeaderName) -> Self {
+        Self(Bytes::from_owner(value))
+    }
+}
+impl From<Bytes> for HeaderNameIR {
+    fn from(value: Bytes) -> Self {
+        Self::new(value)
+    }
+}
+impl From<HeaderNameIR> for Bytes {
+    fn from(val: HeaderNameIR) -> Self {
+        val.0
+    }
+}
+
+impl PartialEq<Vec<u8>> for HeaderNameIR {
+    fn eq(&self, other: &Vec<u8>) -> bool {
+        self.0 == other
+    }
+}
+impl PartialEq<Bytes> for HeaderNameIR {
+    fn eq(&self, other: &Bytes) -> bool {
+        self.0 == other
+    }
+}
+
+pub type HeaderValueIR = Bytes;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HeadersIR(pub Vec<(HeaderNameIR, HeaderValueIR)>);
@@ -134,7 +172,7 @@ impl From<HeaderMap> for HeadersIR {
             } else {
                 last_name.clone().unwrap()
             };
-            let n = Bytes::from_owner(name);
+            let n = HeaderNameIR::from(name);
             vec.push((n, v));
         }
         HeadersIR(vec)
@@ -145,7 +183,7 @@ impl From<HeadersIR> for HeaderMap {
     fn from(value: HeadersIR) -> Self {
         let mut map = HeaderMap::with_capacity(1 << 5);
         for (n, v) in value.0.into_iter() {
-            let name = HeaderName::from_bytes(&n).unwrap();
+            let name = HeaderName::from_bytes(&n.0).unwrap();
             let value = HeaderValue::from_bytes(&v).unwrap();
             map.insert(name, value);
         }
@@ -354,10 +392,26 @@ pub struct FinalResponse {
     pub parts: ERMResponseParts,
     pub body: Vec<TimedFrame>,
 }
+
+impl FinalResponse {
+    pub fn id(&self) -> &Uuid {
+        &self.parts.id
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FinalRequest {
     pub parts: ERMRequestParts,
     pub body: Vec<TimedFrame>,
+}
+
+impl FinalRequest {
+    pub fn headers(&self) -> &HeadersIR {
+        &self.parts.headers
+    }
+    pub fn id(&self) -> &Uuid {
+        &self.parts.id
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -375,9 +429,14 @@ mod tests {
     fn bytes_strategy() -> impl Strategy<Value = Bytes> {
         prop::collection::vec(any::<u8>(), 0..64).prop_map(Bytes::from)
     }
+    fn header_names_strategy() -> impl Strategy<Value = HeaderNameIR> {
+        prop::collection::vec(any::<u8>(), 0..64)
+            .prop_map(|v| HeaderNameIR::new(Bytes::from_owner(v)))
+    }
 
     fn headers_strategy() -> impl Strategy<Value = HeadersIR> {
-        prop::collection::vec((bytes_strategy(), bytes_strategy()), 0..32).prop_map(HeadersIR)
+        prop::collection::vec((header_names_strategy(), bytes_strategy()), 0..32)
+            .prop_map(HeadersIR)
     }
 
     fn url_strategy() -> impl Strategy<Value = UrlIR> {
@@ -482,9 +541,25 @@ mod tests {
         #[test]
         fn mock_round_trips_through_ron(mock in mock_strategy()) {
             let serialized = ron::ser::to_string_pretty(&mock, ron::ser::PrettyConfig::default()).unwrap();
+            dbg!(&serialized);
             let deserialized: Mock = ron::from_str(&serialized).unwrap();
+            dbg!(&deserialized);
 
             prop_assert_eq!(deserialized, mock);
         }
+    }
+    #[test]
+    fn headerir_round_trip_do_not_regain_capitalization() {
+        let header_name = HeaderNameIR::new(Bytes::from_owner(String::from("A")));
+        let header_name_serialized = ron::to_string(&header_name).unwrap();
+        let header_name_deserialized: HeaderNameIR =
+            ron::from_str(&header_name_serialized).unwrap();
+        assert_eq!(header_name, header_name_deserialized);
+    }
+    #[test]
+    fn headerir_deserialize_to_lower_case() {
+        let serialized = ron::to_string(&Bytes::from_owner(String::from("A"))).unwrap();
+        let header_name: HeaderNameIR = ron::from_str(&serialized).unwrap();
+        assert_eq!(header_name, vec![b'a'])
     }
 }
