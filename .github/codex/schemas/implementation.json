@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "tests", "commit_message"],
+  "properties": {
+    "summary": {"type": "string", "minLength": 1},
+    "tests": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "commit_message": {"type": "string", "minLength": 1, "maxLength": 200}
+  }
+}

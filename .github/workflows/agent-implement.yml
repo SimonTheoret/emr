@@ -1,0 +1,131 @@
+name: Agent implementation
+
+on:
+  repository_dispatch:
+    types: [agent-implement]
+
+concurrency:
+  group: agent-implementation-${{ github.event.client_payload.issue }}
+  cancel-in-progress: false
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      id-token: write
+    env:
+      ISSUE_NUMBER: ${{ github.event.client_payload.issue }}
+      PLAN_ID: ${{ github.event.client_payload.plan_id }}
+      BASE_SHA: ${{ github.event.client_payload.base_sha }}
+      REPAIR_RUN: ${{ github.event.client_payload.repair }}
+      OPENAI_FEDERATION_RULE_ID: ${{ vars.OPENAI_IMPLEMENT_FEDERATION_RULE_ID }}
+    steps:
+      - name: Check out trusted workflow controller
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          path: _controller
+          persist-credentials: false
+      - name: Check out approved base or current repair head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.client_payload.repair > 0 && format('refs/pull/{0}/head', github.event.client_payload.pr) || github.event.client_payload.base_sha }}
+          fetch-depth: 0
+          path: work
+          persist-credentials: false
+      - name: Snapshot issue, plan, and repair evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 _controller/.github/scripts/agentctl.py snapshot-issue --issue "$ISSUE_NUMBER" --output "$RUNNER_TEMP/issue.json"
+      - name: Prepare workload identity and permissions
+        id: codex
+        env:
+          OPENAI_WIF_AUDIENCE: ${{ vars.OPENAI_WIF_AUDIENCE }}
+        run: >-
+          python3 _controller/.github/scripts/prepare_codex.py
+          --audience "$OPENAI_WIF_AUDIENCE"
+          --context "$RUNNER_TEMP/issue.json"
+          --task _controller/.github/codex/prompts/implement.md
+          --role implement
+          --output-dir "$RUNNER_TEMP/codex-auth"
+      - name: Run credential-free implementation agent
+        uses: openai/codex-action@83eeca45b831921e73d1f6a7955efccc568fe4e8 # v1.13
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''
+          ACTIONS_ID_TOKEN_REQUEST_URL: ''
+          OPENAI_FEDERATION_RULE_ID: ${{ env.OPENAI_FEDERATION_RULE_ID }}
+          OPENAI_IDENTITY_TOKEN_FILE: ${{ steps.codex.outputs.token_file }}
+          OPENAI_WORKLOAD_IDENTITY_CONTEXT: '{"instance_id":"${{ github.repository }}:implement:${{ env.ISSUE_NUMBER }}:${{ github.run_id }}"}'
+        with:
+          prompt-file: ${{ steps.codex.outputs.prompt }}
+          output-file: ${{ runner.temp }}/codex-auth/result.json
+          output-schema-file: _controller/.github/codex/schemas/implementation.json
+          working-directory: ${{ github.workspace }}/work
+          codex-home: ${{ steps.codex.outputs.codex_home }}
+          permission-profile: agent-implement
+          safety-strategy: drop-sudo
+          model: gpt-5.3-codex
+          effort: medium
+          codex-version: 0.163.0
+          allow-bots: true
+      - name: Capture complete patch
+        run: |
+          git -C work add -N -- .
+          git -C work diff --binary "$BASE_SHA" -- . > "$RUNNER_TEMP/change.patch"
+          test -s "$RUNNER_TEMP/change.patch"
+          git -C work diff --check "$BASE_SHA" -- .
+      - name: Preserve patch and evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: implementation-${{ env.ISSUE_NUMBER }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/change.patch
+            ${{ runner.temp }}/codex-auth/result.json
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: implement
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      statuses: write
+      issues: write
+      pull-requests: write
+    env:
+      ISSUE_NUMBER: ${{ github.event.client_payload.issue }}
+      PLAN_ID: ${{ github.event.client_payload.plan_id }}
+      BASE_SHA: ${{ github.event.client_payload.base_sha }}
+      REPAIR_RUN: ${{ github.event.client_payload.repair }}
+    steps:
+      - name: Check out exact approved base without credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.client_payload.base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: implementation-${{ env.ISSUE_NUMBER }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/implementation
+      - name: Configure publisher identity
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+      - name: Validate patch and publish pull request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .github/scripts/agentctl.py publish-patch
+          --issue "$ISSUE_NUMBER"
+          --plan-id "$PLAN_ID"
+          --base-sha "$BASE_SHA"
+          --patch "$RUNNER_TEMP/implementation/change.patch"
+          --result "$RUNNER_TEMP/implementation/result.json"
+          --root "$GITHUB_WORKSPACE"
+          --repair "$REPAIR_RUN"

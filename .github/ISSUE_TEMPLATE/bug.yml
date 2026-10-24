@@ -1,0 +1,61 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: "bug: "
+labels:
+  - bug
+  - agent/priority:medium
+  - agent/blast:small
+  - agent/risk:low
+  - agent/state:needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting a bug. Please do not include secrets or private traffic recordings.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Give the smallest reliable sequence of commands or requests that reproduces the bug.
+      placeholder: |
+        1. Run `cargo run -- ...`
+        2. Send ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs and examples
+      description: Paste sanitized logs, mock snippets, or other evidence.
+      render: text
+  - type: input
+    id: revision
+    attributes:
+      label: erm revision
+      description: Commit SHA or release version, if known.
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Regression?
+      options:
+        - Unknown
+        - Yes
+        - No
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed credentials, private recordings, and personal data.
+          required: true
+        - label: This is not a vulnerability report.
+          required: true

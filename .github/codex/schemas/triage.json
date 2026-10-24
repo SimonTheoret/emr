@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["priority", "blast", "risk", "rationale", "missing_information"],
+  "properties": {
+    "priority": {"enum": ["low", "medium", "high", "extreme"]},
+    "blast": {"enum": ["small", "medium", "big", "huge"]},
+    "risk": {"enum": ["low", "medium", "high", "extreme"]},
+    "rationale": {"type": "string", "minLength": 1},
+    "missing_information": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

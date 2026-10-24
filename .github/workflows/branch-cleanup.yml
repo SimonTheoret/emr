@@ -1,0 +1,59 @@
+name: Branch cleanup
+
+on:
+  pull_request_target:
+    types: [closed]
+
+jobs:
+  lifecycle-followup:
+    if: ${{ github.event.pull_request.merged && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'agent/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: Check out merged commit without credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Stage a trusted lifecycle controller
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          CONTROLLER_DIR: ${{ runner.temp }}/lifecycle-controller
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          mkdir -p "$CONTROLLER_DIR"
+          controller_source="$MERGE_SHA^"
+          if [[ "$BRANCH" == agent/revert-* ]]; then
+            controller_source="$MERGE_SHA"
+          fi
+          git archive "$controller_source" .github/scripts .github/agent-policy.toml | tar -x -C "$CONTROLLER_DIR"
+      - name: Complete or reopen the source issue
+        env:
+          CONTROLLER_DIR: ${{ runner.temp }}/lifecycle-controller
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 "$CONTROLLER_DIR/.github/scripts/rollback.py" followup --event "$GITHUB_EVENT_PATH"
+
+  delete-agent-branch:
+    if: ${{ github.event.pull_request.merged && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'agent/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Delete merged agent branch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          encoded_branch="${BRANCH//\//%2F}"
+          curl --fail-with-body --silent --show-error \
+            --request DELETE \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$REPOSITORY/git/refs/heads/$encoded_branch"
