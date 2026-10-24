@@ -8,7 +8,7 @@ This is a living design document. It separates observed behavior in the current 
 
 HTTP dependencies are often slow, unreliable, expensive, or difficult to reproduce in tests. Conventional mocks work well for simple request/response APIs but commonly lose streaming behavior, unusual headers, binary bodies, and response timing.
 
-ERM aims to be a local record/replay proxy that captures real HTTP exchanges once and replays them deterministically from human-inspectable files. The intended experience is:
+ERM is a record/replay proxy for local development, automated tests, and CI/CD. It captures real HTTP exchanges once and replays them deterministically from human-inspectable files. The intended experience is:
 
 1. Point an application at ERM instead of an upstream service.
 2. Let ERM replay requests it recognizes.
@@ -23,17 +23,19 @@ The project favors operational simplicity, faithful streaming, and editable arti
 ### Intended capabilities
 
 - Ship as one Rust binary, also buildable as a container image.
+- Run in developer and test environments, including CI/CD pipelines.
 - Proxy HTTP requests to an HTTP or HTTPS destination.
 - Record request and response metadata, body frames, and inter-frame delays.
 - Persist recordings as RON files and notice edits without restarting.
 - Match an incoming `x-erm-match` value to a recorded exchange and stream the stored response.
 - Make match misses and malformed recordings diagnosable.
+- Can match any request
 
 ### Provisional non-goals
 
-These boundaries reflect the current direction and need confirmation:
+These boundaries define what ERM is not intended to become:
 
-- Acting as a production API gateway, reverse-proxy fleet, or load-testing system.
+- Serving production traffic or acting as a production API gateway, reverse-proxy fleet, or load-testing system.
 - Intercepting arbitrary HTTPS traffic through certificate-based MITM.
 - Providing distributed storage or multi-process coordination.
 - Preserving transport-level details below HTTP body frames.
@@ -127,6 +129,7 @@ Each completed request/response pair should be stored in one versioned `exchange
 ## Confirmed Decisions
 
 - ERM uses hybrid record/replay behavior by default.
+- ERM is intended for development, testing, and CI/CD—not production proxying.
 - Strict behavior returns an error on a match miss and never falls through to the upstream.
 - Initial matching remains based on the user-provided `x-erm-match` header.
 - A missing `x-erm-match` header is always an error and is never proxied or recorded.
