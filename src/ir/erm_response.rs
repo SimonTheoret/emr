@@ -50,10 +50,11 @@ mod tests {
     use bytes::Bytes;
     use futures::{StreamExt, stream};
     use http::{HeaderMap, StatusCode, Version};
+    use proptest::prelude::*;
     use url::Url;
 
     use super::*;
-    use crate::ir::version::tests::version_cases;
+    use crate::ir::{status_code::tests::status_code_strategy, version::tests::version_strategy};
 
     fn response() -> ERMResponse {
         let mut headers = HeaderMap::new();
@@ -109,20 +110,20 @@ mod tests {
         assert!(body.next().await.is_none());
     }
 
-    #[test]
-    fn into_response_preserves_every_status_and_version() {
-        for code in 100..=999 {
-            for (version, expected_version) in version_cases() {
-                let status = StatusCode::from_u16(code).unwrap();
-                let mut response = response();
-                response.status = status.into();
-                response.version = version;
+    proptest! {
+        #[test]
+        fn into_response_preserves_status_and_version(
+            status in status_code_strategy(),
+            version in version_strategy(),
+        ) {
+            let mut response = response();
+            response.status = status;
+            response.version = version;
 
-                let response = response.into_response();
+            let response = response.into_response();
 
-                assert_eq!(response.status(), status);
-                assert_eq!(response.version(), expected_version);
-            }
+            prop_assert_eq!(response.status(), StatusCode::from(status));
+            prop_assert_eq!(response.version(), Version::from(version));
         }
     }
 }

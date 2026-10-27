@@ -55,7 +55,7 @@ pub(crate) mod tests {
         prop::sample::select(version_cases().to_vec())
     }
 
-    pub(crate) fn version_cases() -> [(VersionIR, Version); 5] {
+    fn version_cases() -> [(VersionIR, Version); 5] {
         [
             (VersionIR::Http09, Version::HTTP_09),
             (VersionIR::Http10, Version::HTTP_10),
