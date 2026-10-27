@@ -49,6 +49,32 @@ class LocalAgentWorkflowTests(unittest.TestCase):
         with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
             workflow.parse_args(["1", "--max-repairs", "-1"])
 
+    def test_completed_phases_are_not_repeated(self) -> None:
+        state = {"phase": "implementation"}
+
+        self.assertTrue(workflow.phase_completed(state, "triage"))
+        self.assertTrue(workflow.phase_completed(state, "implementation"))
+        self.assertFalse(workflow.phase_completed(state, "review"))
+
+    def test_resume_selects_latest_issue_checkpoint(self) -> None:
+        with TemporaryDirectory() as directory:
+            repo = Path(directory)
+            older = repo / ".local-agent-runs" / "issue-7-20260101T000000Z"
+            newer = repo / ".local-agent-runs" / "issue-7-20260102T000000Z"
+            older.mkdir(parents=True)
+            newer.mkdir(parents=True)
+            (older / "state.json").write_text("{}", encoding="utf-8")
+            (newer / "state.json").write_text("{}", encoding="utf-8")
+
+            selected = workflow.find_resume_dir(repo, 7, "latest")
+
+        self.assertEqual(newer, selected)
+
+    def test_resume_accepts_an_explicit_checkpoint(self) -> None:
+        args = workflow.parse_args(["7", "--resume", "/tmp/saved-run"])
+
+        self.assertEqual("/tmp/saved-run", args.resume)
+
 
 if __name__ == "__main__":
     unittest.main()

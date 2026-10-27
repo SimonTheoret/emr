@@ -27,3 +27,12 @@ The script triages the issue, proposes a plan for approval, creates a dedicated
 worktree, implements and validates the change, performs a fresh Codex review, and
 asks again before committing, pushing, and opening a pull request. Use `--quick`
 to skip Nix and Docker builds, or `--no-publish` to stop with local reviewed changes.
+
+Each completed phase is checkpointed under `.local-agent-runs/`. Continue the
+latest run for an issue without repeating completed phases:
+
+```sh
+python3 scripts/local_agent_workflow.py 123 --resume
+```
+
+Pass a checkpoint directory after `--resume` to select an older run explicitly.

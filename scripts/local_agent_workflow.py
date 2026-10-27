@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -130,6 +131,8 @@ NIX_CHECKS = [
     ("docker", ["nix", "build", ".#dockerImage", "--no-link", "--print-build-logs"]),
 ]
 
+PHASES = ["issue", "triage", "plan", "worktree", "implementation", "review", "published"]
+
 
 class WorkflowError(RuntimeError):
     pass
@@ -174,6 +177,43 @@ def read_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise WorkflowError(f"Codex output at {path} is not a JSON object")
     return value
+
+
+def phase_completed(state: dict[str, Any], phase: str) -> bool:
+    try:
+        return PHASES.index(state["phase"]) >= PHASES.index(phase)
+    except (KeyError, ValueError) as error:
+        raise WorkflowError(f"invalid workflow phase in {state}") from error
+
+
+def save_state(artifacts: Path, state: dict[str, Any]) -> None:
+    write_json(artifacts / "state.json", state)
+
+
+def find_resume_dir(repo: Path, issue_number: int, requested: str) -> Path:
+    if requested != "latest":
+        candidate = Path(requested).expanduser().resolve()
+        if not (candidate / "state.json").is_file():
+            raise WorkflowError(f"resume directory has no state.json: {candidate}")
+        return candidate
+
+    root = repo / ".local-agent-runs"
+    candidates = sorted(root.glob(f"issue-{issue_number}-*/state.json"), reverse=True)
+    if not candidates:
+        raise WorkflowError(f"no saved workflow found for issue #{issue_number}")
+    return candidates[0].parent
+
+
+def diff_fingerprint(worktree: Path, base_sha: str) -> str:
+    result = subprocess.run(
+        ["git", "diff", "--binary", base_sha, "--"],
+        cwd=worktree,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise WorkflowError(f"could not fingerprint worktree diff: {result.stderr.decode(errors='replace')}")
+    return hashlib.sha256(result.stdout).hexdigest()
 
 
 def run_codex(
@@ -328,15 +368,29 @@ def publish(
     *,
     worktree: Path,
     issue: dict[str, Any],
+    base_sha: str,
     base_branch: str,
     branch: str,
     implementation: dict[str, Any],
     review: dict[str, Any],
 ) -> str:
-    capture(["git", "diff", "--check"], worktree)
-    capture(["git", "add", "--all"], worktree)
-    capture(["git", "commit", "-m", implementation["commit_message"]], worktree)
+    head_sha = capture(["git", "rev-parse", "HEAD"], worktree)
+    if head_sha == base_sha:
+        capture(["git", "diff", "--check"], worktree)
+        capture(["git", "add", "--all"], worktree)
+        capture(["git", "commit", "-m", implementation["commit_message"]], worktree)
+    elif capture(["git", "status", "--short"], worktree):
+        raise WorkflowError("worktree contains changes on top of the already-created commit")
     capture(["git", "push", "--set-upstream", "origin", branch], worktree)
+    existing = subprocess.run(
+        ["gh", "pr", "view", branch, "--json", "url", "--jq", ".url"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if existing.returncode == 0 and existing.stdout.strip():
+        return existing.stdout.strip()
     body = (
         f"Closes #{issue['number']}\n\n"
         f"## Summary\n{implementation['summary']}\n\n"
@@ -375,6 +429,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--quick", action="store_true", help="skip Nix and Docker checks")
     parser.add_argument("--no-fetch", action="store_true", help="use the existing local base ref")
     parser.add_argument("--no-publish", action="store_true", help="leave reviewed changes uncommitted locally")
+    parser.add_argument(
+        "--resume",
+        nargs="?",
+        const="latest",
+        metavar="RUN_DIR",
+        help="continue the latest saved run, or the run in RUN_DIR",
+    )
     parser.add_argument("--yes", action="store_true", help="approve plan and publication without prompting")
     args = parser.parse_args(argv)
     if args.max_repairs < 0:
@@ -384,29 +445,54 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    for executable in ("git", "gh", "codex", "cargo"):
+    for executable in ("git", "gh"):
         if shutil.which(executable) is None:
             raise WorkflowError(f"required executable not found: {executable}")
-    if not args.quick and shutil.which("nix") is None:
-        raise WorkflowError("required executable not found: nix (or pass --quick)")
 
     repo = Path(capture(["git", "rev-parse", "--show-toplevel"], Path.cwd())).resolve()
-    issue = fetch_issue(repo, args.issue)
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    artifacts = repo / ".local-agent-runs" / f"issue-{args.issue}-{timestamp}"
-    artifacts.mkdir(parents=True)
-    write_json(artifacts / "issue.json", issue)
+    if args.resume:
+        artifacts = find_resume_dir(repo, args.issue, args.resume)
+        state = read_json(artifacts / "state.json")
+        if state.get("issue_number") != args.issue:
+            raise WorkflowError(f"saved run belongs to issue #{state.get('issue_number')}")
+        issue = read_json(artifacts / "issue.json")
+        print(f"Resuming issue #{args.issue} after completed phase: {state['phase']}")
+        print(f"Artifacts: {artifacts}")
+    else:
+        issue = fetch_issue(repo, args.issue)
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        artifacts = repo / ".local-agent-runs" / f"issue-{args.issue}-{timestamp}"
+        artifacts.mkdir(parents=True)
+        write_json(artifacts / "issue.json", issue)
+        state = {"version": 1, "issue_number": args.issue, "phase": "issue", "repair_count": 0}
+        save_state(artifacts, state)
 
-    triage = run_codex(
-        role="triage",
-        instructions=TRIAGE_PROMPT,
-        context={"issue": issue},
-        schema=TRIAGE_SCHEMA,
-        cwd=repo,
-        artifacts=artifacts,
-        model=args.model,
-        writable=False,
-    )
+    if phase_completed(state, "published"):
+        print(f"Pull request: {state['pr_url']}")
+        return 0
+
+    if not phase_completed(state, "review"):
+        for executable in ("codex", "cargo"):
+            if shutil.which(executable) is None:
+                raise WorkflowError(f"required executable not found: {executable}")
+        if not args.quick and shutil.which("nix") is None:
+            raise WorkflowError("required executable not found: nix (or pass --quick)")
+
+    if phase_completed(state, "triage"):
+        triage = read_json(artifacts / "triage.json")
+    else:
+        triage = run_codex(
+            role="triage",
+            instructions=TRIAGE_PROMPT,
+            context={"issue": issue},
+            schema=TRIAGE_SCHEMA,
+            cwd=repo,
+            artifacts=artifacts,
+            model=args.model,
+            writable=False,
+        )
+        state["phase"] = "triage"
+        save_state(artifacts, state)
     if triage["missing_information"]:
         print("\nThe issue needs more information:")
         for question in triage["missing_information"]:
@@ -414,97 +500,149 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Artifacts: {artifacts}")
         return 2
 
-    plan = run_codex(
-        role="plan",
-        instructions=PLAN_PROMPT,
-        context={"issue": issue, "triage": triage},
-        schema=PLAN_SCHEMA,
-        cwd=repo,
-        artifacts=artifacts,
-        model=args.model,
-        writable=False,
-    )
-    print_plan(triage, plan)
-    if not confirm("Approve this plan and create an implementation worktree?", args.yes):
-        print(f"Stopped before implementation. Artifacts: {artifacts}")
-        return 0
-
-    if not args.no_fetch:
-        capture(["git", "fetch", "origin", args.base], repo)
-        base_ref = f"origin/{args.base}"
+    if phase_completed(state, "plan"):
+        plan = read_json(artifacts / "plan.json")
     else:
-        base_ref = args.base
-    branch = args.branch or f"codex/issue-{args.issue}-{slugify(issue['title'])}"
-    worktree = (args.worktree or repo.parent / f"{repo.name}-issue-{args.issue}").resolve()
-    base_sha = create_worktree(repo, base_ref, branch, worktree)
+        plan = run_codex(
+            role="plan",
+            instructions=PLAN_PROMPT,
+            context={"issue": issue, "triage": triage},
+            schema=PLAN_SCHEMA,
+            cwd=repo,
+            artifacts=artifacts,
+            model=args.model,
+            writable=False,
+        )
+        state["phase"] = "plan"
+        save_state(artifacts, state)
+    print_plan(triage, plan)
+    if not state.get("plan_approved"):
+        if not confirm("Approve this plan and create an implementation worktree?", args.yes):
+            print(f"Stopped before implementation. Resume with: {sys.argv[0]} {args.issue} --resume")
+            return 0
+        state["plan_approved"] = True
+        save_state(artifacts, state)
 
-    implementation = run_codex(
-        role="implementation",
-        instructions=IMPLEMENT_PROMPT,
-        context={"issue": issue, "triage": triage, "approved_plan": plan},
-        schema=IMPLEMENTATION_SCHEMA,
-        cwd=worktree,
-        artifacts=artifacts,
-        model=args.model,
-        writable=True,
-    )
-
-    review: dict[str, Any] | None = None
-    for attempt in range(args.max_repairs + 1):
-        # Make new files visible to `git diff` without staging their contents.
-        capture(["git", "add", "--intent-to-add", "--", "."], worktree)
-        if not capture(["git", "status", "--short"], worktree):
-            raise WorkflowError(f"implementation produced no changes; worktree preserved at {worktree}")
-        checks_passed, validation = run_checks(worktree, artifacts, args.quick, attempt)
-        if checks_passed:
-            review = run_codex(
-                role="review",
-                instructions=REVIEW_PROMPT,
-                context={
-                    "issue": issue,
-                    "approved_plan": plan,
-                    "implementation": implementation,
-                    "validation": validation,
-                    "base_sha": base_sha,
-                },
-                schema=REVIEW_SCHEMA,
-                cwd=worktree,
-                artifacts=artifacts,
-                model=args.model,
-                writable=False,
-                sequence=attempt,
-            )
-            if review["verdict"] == "pass":
-                break
-            feedback = "Review blocked the change:\n" + "\n".join(review["findings"])
+    if phase_completed(state, "worktree"):
+        worktree = Path(state["worktree"]).resolve()
+        branch = state["branch"]
+        base_sha = state["base_sha"]
+        if not worktree.is_dir():
+            raise WorkflowError(f"saved worktree no longer exists: {worktree}")
+    else:
+        if not args.no_fetch:
+            capture(["git", "fetch", "origin", args.base], repo)
+            base_ref = f"origin/{args.base}"
         else:
-            feedback = validation
+            base_ref = args.base
+        branch = args.branch or f"codex/issue-{args.issue}-{slugify(issue['title'])}"
+        worktree = (args.worktree or repo.parent / f"{repo.name}-issue-{args.issue}").resolve()
+        base_sha = create_worktree(repo, base_ref, branch, worktree)
+        state.update(
+            {
+                "phase": "worktree",
+                "base_branch": args.base,
+                "base_sha": base_sha,
+                "branch": branch,
+                "worktree": str(worktree),
+            }
+        )
+        save_state(artifacts, state)
 
-        if attempt == args.max_repairs:
-            raise WorkflowError(
-                f"validation/review still fails after {args.max_repairs} repair run(s); "
-                f"worktree preserved at {worktree}"
-            )
+    if phase_completed(state, "implementation"):
+        implementation = read_json(artifacts / "implementation-current.json")
+    else:
         implementation = run_codex(
-            role="repair",
-            instructions=IMPLEMENT_PROMPT
-            + "\nThis is a repair run. Preserve correct work and address every supplied failure.\n",
-            context={
-                "issue": issue,
-                "triage": triage,
-                "approved_plan": plan,
-                "previous_implementation": implementation,
-                "failure_feedback": feedback,
-            },
+            role="implementation",
+            instructions=IMPLEMENT_PROMPT,
+            context={"issue": issue, "triage": triage, "approved_plan": plan},
             schema=IMPLEMENTATION_SCHEMA,
             cwd=worktree,
             artifacts=artifacts,
             model=args.model,
             writable=True,
-            sequence=attempt + 1,
         )
+        write_json(artifacts / "implementation-current.json", implementation)
+        state["phase"] = "implementation"
+        save_state(artifacts, state)
 
-    assert review is not None
+    if phase_completed(state, "review"):
+        review = read_json(artifacts / "review-current.json")
+    else:
+        review: dict[str, Any] | None = None
+        while review is None:
+            attempt = int(state.get("repair_count", 0))
+            # Make new files visible to `git diff` without staging their contents.
+            capture(["git", "add", "--intent-to-add", "--", "."], worktree)
+            if not capture(["git", "status", "--short"], worktree):
+                raise WorkflowError(
+                    f"implementation produced no changes; worktree preserved at {worktree}"
+                )
+            checks_passed, validation = run_checks(worktree, artifacts, args.quick, attempt)
+            if checks_passed:
+                candidate = run_codex(
+                    role="review",
+                    instructions=REVIEW_PROMPT,
+                    context={
+                        "issue": issue,
+                        "approved_plan": plan,
+                        "implementation": implementation,
+                        "validation": validation,
+                        "base_sha": base_sha,
+                    },
+                    schema=REVIEW_SCHEMA,
+                    cwd=worktree,
+                    artifacts=artifacts,
+                    model=args.model,
+                    writable=False,
+                    sequence=attempt,
+                )
+                if candidate["verdict"] == "pass":
+                    review = candidate
+                    break
+                feedback = "Review blocked the change:\n" + "\n".join(candidate["findings"])
+            else:
+                feedback = validation
+
+            if attempt >= args.max_repairs:
+                raise WorkflowError(
+                    f"validation/review still fails after {args.max_repairs} repair run(s); "
+                    f"worktree preserved at {worktree}"
+                )
+            next_repair = attempt + 1
+            implementation = run_codex(
+                role="repair",
+                instructions=IMPLEMENT_PROMPT
+                + "\nThis is a repair run. Preserve correct work and address every supplied failure.\n",
+                context={
+                    "issue": issue,
+                    "triage": triage,
+                    "approved_plan": plan,
+                    "previous_implementation": implementation,
+                    "failure_feedback": feedback,
+                },
+                schema=IMPLEMENTATION_SCHEMA,
+                cwd=worktree,
+                artifacts=artifacts,
+                model=args.model,
+                writable=True,
+                sequence=next_repair,
+            )
+            write_json(artifacts / "implementation-current.json", implementation)
+            state["repair_count"] = next_repair
+            save_state(artifacts, state)
+
+        # Make new files visible to `git diff` without staging their contents.
+        capture(["git", "add", "--intent-to-add", "--", "."], worktree)
+        write_json(artifacts / "review-current.json", review)
+        state.update(
+            {
+                "phase": "review",
+                "reviewed_diff_sha256": diff_fingerprint(worktree, base_sha),
+            }
+        )
+        save_state(artifacts, state)
+
     print("\n== Reviewed changes ==")
     print(capture(["git", "diff", "--stat", base_sha, "--"], worktree))
     print(review["summary"])
@@ -514,17 +652,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.no_publish:
         return 0
     if not confirm("Commit, push, and open the pull request?", args.yes):
-        print("Changes were left uncommitted in the worktree.")
+        print(f"Changes were left uncommitted. Resume with: {sys.argv[0]} {args.issue} --resume")
         return 0
+
+    capture(["git", "add", "--intent-to-add", "--", "."], worktree)
+    if diff_fingerprint(worktree, base_sha) != state["reviewed_diff_sha256"]:
+        state["phase"] = "implementation"
+        save_state(artifacts, state)
+        raise WorkflowError("worktree changed after review; resume to validate and review the new diff")
 
     pr_url = publish(
         worktree=worktree,
         issue=issue,
-        base_branch=args.base,
+        base_sha=base_sha,
+        base_branch=state["base_branch"],
         branch=branch,
         implementation=implementation,
         review=review,
     )
+    state.update({"phase": "published", "pr_url": pr_url})
+    save_state(artifacts, state)
     print(f"Pull request: {pr_url}")
     return 0
 
