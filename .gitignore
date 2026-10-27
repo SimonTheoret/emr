@@ -3,6 +3,7 @@
 /.envrc
 **/*.drawio.bkp
 **/*.ron
+!src/ir/fixtures/v0/*.ron
 **/*.drawio.dtmp
 /result
 **/__pycache__
