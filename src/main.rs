@@ -1,5 +1,4 @@
 use clap::Parser;
-use ron::ser::PrettyConfig;
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -107,7 +106,7 @@ async fn serialize_response(
         data.push(tf);
     }
     let ser_res = Mock::Response(FinalResponse { parts, body: data });
-    let content = ron::ser::to_string_pretty(&ser_res, PrettyConfig::default())?;
+    let content = ser_res.to_pretty_ron()?;
     dir.push(format!("response_{}.ron", id.clone()));
     std::fs::write(dir, content)?;
     Ok(())
@@ -124,7 +123,7 @@ async fn serialize_request(
         data.push(tf);
     }
     let ser_res = Mock::Request(FinalRequest { parts, body: data });
-    let content = ron::ser::to_string_pretty(&ser_res, PrettyConfig::default())?;
+    let content = ser_res.to_pretty_ron()?;
     dir.push(format!("request_{}.ron", id.clone()));
     std::fs::write(dir, content)?;
     Ok(())

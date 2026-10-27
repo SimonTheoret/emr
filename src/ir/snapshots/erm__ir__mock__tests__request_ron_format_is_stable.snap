@@ -1,0 +1,33 @@
+---
+source: src/ir/mock.rs
+expression: request_mock().to_pretty_ron().unwrap()
+---
+Request((
+    parts: (
+        method: Post,
+        version: Http2,
+        headers: ([
+            (b"x-erm-match", b"snapshot-request"),
+            (b"set-cookie", b"first=1"),
+            (b"set-cookie", b"second=2"),
+        ]),
+        uri: "/resource/%E2%9C%93?query=hello%20world",
+        id: "00000000-0000-0000-0000-000000000001",
+    ),
+    body: [
+        (
+            content: b"first",
+            tslf: (
+                secs: 0,
+                nanos: 0,
+            ),
+        ),
+        (
+            content: b"\x00\xffsecond",
+            tslf: (
+                secs: 1,
+                nanos: 250000000,
+            ),
+        ),
+    ],
+))
