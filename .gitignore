@@ -6,3 +6,4 @@
 **/*.drawio.dtmp
 /result
 **/__pycache__/
+/.local-agent-runs/
