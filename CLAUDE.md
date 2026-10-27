@@ -27,8 +27,8 @@ replay/matching exists as a library function but is not called from the request 
   includes `cargo-nextest`, `cargo-insta`, `cargo-expand`, and `gdb`.
 - `nix build` builds the statically linked release binary; `nix build .#dockerImage` builds the
   container image.
-- `ci/pipeline.sh` is just a shebang — do not infer CI command ordering from it. The only CI
-  (`.gitea/workflows/ci.yml`) is the stock Gitea demo workflow, not a real gate.
+- `.github/workflows/ci.yml` runs formatting, Clippy, tests, compilation, Nix packaging, and the
+  Nix-built Docker image for pull requests and pushes to `main`.
 
 ## Architecture
 

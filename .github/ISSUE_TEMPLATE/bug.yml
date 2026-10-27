@@ -3,10 +3,6 @@ description: Report reproducible incorrect behavior
 title: "bug: "
 labels:
   - bug
-  - agent/priority:medium
-  - agent/blast:small
-  - agent/risk:low
-  - agent/state:needs-triage
 body:
   - type: markdown
     attributes:
