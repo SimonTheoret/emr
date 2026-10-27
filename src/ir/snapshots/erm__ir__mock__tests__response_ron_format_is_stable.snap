@@ -1,0 +1,33 @@
+---
+source: src/ir/mock.rs
+expression: response_mock().to_pretty_ron().unwrap()
+---
+Response((
+    parts: (
+        url: ("https://example.test/resource?query=hello%20world"),
+        version: Http2,
+        headers: ([
+            (b"content-type", b"application/octet-stream"),
+            (b"set-cookie", b"first=1"),
+            (b"set-cookie", b"second=2"),
+        ]),
+        status: (206),
+        id: "00000000-0000-0000-0000-000000000001",
+    ),
+    body: [
+        (
+            content: b"",
+            tslf: (
+                secs: 0,
+                nanos: 0,
+            ),
+        ),
+        (
+            content: b"response",
+            tslf: (
+                secs: 0,
+                nanos: 125000000,
+            ),
+        ),
+    ],
+))
