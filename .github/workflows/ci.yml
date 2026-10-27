@@ -5,8 +5,6 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
-  repository_dispatch:
-    types: [agent-ci]
   workflow_dispatch:
 
 permissions:
@@ -20,7 +18,6 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.client_payload.head_sha || github.sha }}
           persist-credentials: false
       - run: cargo fmt --check
 
@@ -31,7 +28,6 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.client_payload.head_sha || github.sha }}
           persist-credentials: false
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
@@ -42,11 +38,8 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.client_payload.head_sha || github.sha }}
           persist-credentials: false
       - run: cargo test
-      - name: Test workflow policy
-        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
   build:
     name: cargo build --all-targets
@@ -55,7 +48,6 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.client_payload.head_sha || github.sha }}
           persist-credentials: false
       - run: cargo build --all-targets
 
@@ -66,14 +58,12 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.client_payload.head_sha || github.sha }}
           persist-credentials: false
       - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771 # v31
       - run: nix build --print-build-logs
 
   docker-image:
     name: nix build .#dockerImage
-    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -82,220 +72,3 @@ jobs:
           persist-credentials: false
       - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771 # v31
       - run: nix build .#dockerImage --print-build-logs
-
-  rollback-validate:
-    name: rollback-validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-    env:
-      PR_NUMBER: ${{ github.event.pull_request.number || github.event.client_payload.pr }}
-    steps:
-      - name: Check out trusted validation controller
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: main
-          path: _controller
-          persist-credentials: false
-      - name: Check out candidate head
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ github.event.client_payload.head_sha || github.sha }}
-          fetch-depth: 0
-          path: work
-          persist-credentials: false
-      - name: Require exact parent tree restoration
-        if: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'agent/revert-')) || github.event.client_payload.kind == 'rollback' }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python3 _controller/.github/scripts/rollback.py validate-pr --pr "$PR_NUMBER" --root "$GITHUB_WORKSPACE/work"
-
-  agent-review:
-    name: agent-review
-    needs: [fmt, clippy, test, build, nix, rollback-validate]
-    if: ${{ always() && (github.event_name == 'pull_request' || github.event.client_payload.pr != '') && github.event.pull_request.draft != true && needs.fmt.result == 'success' && needs.clippy.result == 'success' && needs.test.result == 'success' && needs.build.result == 'success' && needs.nix.result == 'success' && needs.rollback-validate.result == 'success' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      issues: read
-      pull-requests: read
-      id-token: write
-    env:
-      PR_NUMBER: ${{ github.event.pull_request.number || github.event.client_payload.pr }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}
-      IS_AGENT_PR: ${{ (startsWith(github.head_ref, 'agent/issue-') && github.event.pull_request.head.repo.full_name == github.repository) || github.event.client_payload.kind == 'agent' }}
-      OPENAI_FEDERATION_RULE_ID: ${{ vars.OPENAI_READ_FEDERATION_RULE_ID }}
-    steps:
-      - name: Check out trusted review controller
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: main
-          path: _controller
-          persist-credentials: false
-      - name: Check out reviewed code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ github.event.client_payload.head_sha || github.sha }}
-          path: work
-          persist-credentials: false
-      - name: Build fresh review context
-        if: ${{ env.IS_AGENT_PR == 'true' }}
-        id: context
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python3 _controller/.github/scripts/agentctl.py review-context --pr "$PR_NUMBER" --output "$RUNNER_TEMP/review.json"
-      - name: Prepare workload identity and permissions
-        if: ${{ env.IS_AGENT_PR == 'true' }}
-        id: codex
-        env:
-          OPENAI_WIF_AUDIENCE: ${{ vars.OPENAI_WIF_AUDIENCE }}
-        run: >-
-          python3 _controller/.github/scripts/prepare_codex.py
-          --audience "$OPENAI_WIF_AUDIENCE"
-          --context "$RUNNER_TEMP/review.json"
-          --task _controller/.github/codex/prompts/review.md
-          --role read
-          --output-dir "$RUNNER_TEMP/codex-auth"
-      - name: Run fresh-context review agent
-        if: ${{ env.IS_AGENT_PR == 'true' }}
-        uses: openai/codex-action@83eeca45b831921e73d1f6a7955efccc568fe4e8 # v1.13
-        env:
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''
-          ACTIONS_ID_TOKEN_REQUEST_URL: ''
-          OPENAI_FEDERATION_RULE_ID: ${{ env.OPENAI_FEDERATION_RULE_ID }}
-          OPENAI_IDENTITY_TOKEN_FILE: ${{ steps.codex.outputs.token_file }}
-          OPENAI_WORKLOAD_IDENTITY_CONTEXT: '{"instance_id":"${{ github.repository }}:review:${{ env.PR_NUMBER }}:${{ github.run_id }}"}'
-        with:
-          prompt-file: ${{ steps.codex.outputs.prompt }}
-          output-file: ${{ runner.temp }}/codex-auth/result.json
-          output-schema-file: _controller/.github/codex/schemas/review.json
-          working-directory: ${{ github.workspace }}/work
-          codex-home: ${{ steps.codex.outputs.codex_home }}
-          permission-profile: agent-read
-          safety-strategy: drop-sudo
-          model: gpt-5.3-codex
-          effort: medium
-          codex-version: 0.163.0
-          allow-bots: true
-      - name: Preserve review result
-        if: ${{ env.IS_AGENT_PR == 'true' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: review-${{ env.PR_NUMBER }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/codex-auth/result.json
-          if-no-files-found: error
-          retention-days: 1
-      - name: Enforce review verdict
-        if: ${{ env.IS_AGENT_PR == 'true' }}
-        run: >-
-          python3 _controller/.github/scripts/agentctl.py validate-review
-          --result "$RUNNER_TEMP/codex-auth/result.json"
-          --specialist-cap "${{ steps.context.outputs.specialist_cap }}"
-
-  publish-agent-review:
-    name: Publish agent review
-    needs: agent-review
-    if: ${{ always() && ((github.event_name == 'pull_request' && startsWith(github.head_ref, 'agent/issue-') && github.event.pull_request.head.repo.full_name == github.repository) || github.event.client_payload.kind == 'agent') && needs.agent-review.result != 'cancelled' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-    env:
-      PR_NUMBER: ${{ github.event.pull_request.number || github.event.client_payload.pr }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: main
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: review-${{ env.PR_NUMBER }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/review
-      - name: Publish review and schedule repair when blocked
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          python3 .github/scripts/agentctl.py publish-review
-          --pr "$PR_NUMBER"
-          --result "${{ runner.temp }}/review/result.json"
-          --head-sha "$HEAD_SHA"
-
-  repair-on-ci-failure:
-    name: Schedule CI repair
-    needs: [fmt, clippy, test, build, nix]
-    if: ${{ always() && ((github.event_name == 'pull_request' && startsWith(github.head_ref, 'agent/issue-') && github.event.pull_request.head.repo.full_name == github.repository) || github.event.client_payload.kind == 'agent') && (needs.fmt.result == 'failure' || needs.clippy.result == 'failure' || needs.test.result == 'failure' || needs.build.result == 'failure' || needs.nix.result == 'failure') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: read
-    env:
-      PR_NUMBER: ${{ github.event.pull_request.number || github.event.client_payload.pr }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.client_payload.head_sha }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: main
-          persist-credentials: false
-      - name: Consolidate failed checks into one repair run
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          FAILED_CHECKS: fmt=${{ needs.fmt.result }}, clippy=${{ needs.clippy.result }}, test=${{ needs.test.result }}, build=${{ needs.build.result }}, nix=${{ needs.nix.result }}
-        run: >-
-          python3 .github/scripts/agentctl.py publish-ci-failure
-          --pr "$PR_NUMBER"
-          --head-sha "$HEAD_SHA"
-          --failed-checks "$FAILED_CHECKS"
-
-  publish-dispatched-statuses:
-    name: Publish dispatched check statuses
-    needs: [fmt, clippy, test, build, nix, rollback-validate, agent-review]
-    if: ${{ always() && github.event_name == 'repository_dispatch' && (github.event.client_payload.kind == 'agent' || github.event.client_payload.kind == 'rollback') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      statuses: write
-    steps:
-      - name: Check out trusted status publisher
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: main
-          persist-credentials: false
-      - name: Serialize required outcomes
-        env:
-          OUT_FMT: ${{ needs.fmt.result }}
-          OUT_CLIPPY: ${{ needs.clippy.result }}
-          OUT_TEST: ${{ needs.test.result }}
-          OUT_BUILD: ${{ needs.build.result }}
-          OUT_NIX: ${{ needs.nix.result }}
-          OUT_ROLLBACK: ${{ needs.rollback-validate.result }}
-          OUT_REVIEW: ${{ needs.agent-review.result }}
-        run: >-
-          jq -n
-          --arg fmt "$OUT_FMT"
-          --arg clippy "$OUT_CLIPPY"
-          --arg test "$OUT_TEST"
-          --arg build "$OUT_BUILD"
-          --arg nix "$OUT_NIX"
-          --arg rollback "$OUT_ROLLBACK"
-          --arg review "$OUT_REVIEW"
-          '{"cargo fmt --check":$fmt,"cargo clippy":$clippy,"cargo test":$test,"cargo build --all-targets":$build,"nix build":$nix,"rollback-validate":$rollback,"agent-review":$review}'
-          > "$RUNNER_TEMP/outcomes.json"
-      - name: Publish statuses on the pull request head
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.client_payload.head_sha }}
-        run: >-
-          python3 .github/scripts/agentctl.py publish-ci-statuses
-          --head-sha "$HEAD_SHA"
-          --pr "${{ github.event.client_payload.pr }}"
-          --kind "${{ github.event.client_payload.kind }}"
-          --outcomes "$RUNNER_TEMP/outcomes.json"

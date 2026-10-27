@@ -5,4 +5,3 @@
 **/*.ron
 **/*.drawio.dtmp
 /result
-**/__pycache__/

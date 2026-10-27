@@ -3,10 +3,6 @@ description: Propose a behavior or workflow improvement
 title: "feat: "
 labels:
   - enhancement
-  - agent/priority:medium
-  - agent/blast:small
-  - agent/risk:low
-  - agent/state:needs-triage
 body:
   - type: textarea
     id: problem
