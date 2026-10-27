@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 use uuid::Uuid;
 
 use axum::{Router, extract::Request, extract::State, routing::any};
@@ -22,6 +22,7 @@ use tokio::{
 mod cli;
 mod ir;
 pub mod matching;
+mod proxy;
 mod storage;
 use crate::{
     cli::Args,
@@ -29,6 +30,7 @@ use crate::{
         BodyStream, ERMRequest, ERMRequestParts, ERMResponse, ERMResponseParts, FinalRequest,
         FinalResponse, HeadersIR, Mock, StatusCodeIR, TimedFrame, UrlIR, VersionIR,
     },
+    proxy::{parse_destination, sanitize_headers, upstream_url},
     storage::MockFileStorage,
 };
 
@@ -36,7 +38,7 @@ const SERIALIZATION_EXTENSION: &str = "ron";
 
 #[derive(Clone)]
 struct Config {
-    destination: String,
+    destination: url::Url,
     mock_dir: PathBuf,
 }
 
@@ -47,9 +49,12 @@ async fn send_request(
     channel: UnboundedSender<TimedFrame>,
 ) -> Result<ERMResponse> {
     let (client, config) = (state.client, state.config);
+    let destination = upstream_url(&config.destination, &req.uri.0)?;
+    let mut headers: http::HeaderMap = req.headers.into();
+    sanitize_headers(&mut headers);
     let res = client
-        .request(req.method.into(), &config.destination)
-        .headers(req.headers.into())
+        .request(req.method.into(), destination)
+        .headers(headers)
         .version(req.version.into())
         .body(reqwest::Body::wrap_stream(req.body.0))
         .send()
@@ -130,7 +135,7 @@ async fn serialize_request(
     Ok(())
 }
 
-#[instrument(skip(app_state))]
+#[instrument(skip(app_state, req))]
 async fn handle_request(State(app_state): State<AppState>, req: Request) -> ERMResponse {
     let id = Uuid::now_v7();
     let mock_dir = app_state.config.mock_dir.clone();
@@ -154,17 +159,18 @@ async fn handle_request(State(app_state): State<AppState>, req: Request) -> ERMR
     let files = guard
         .mocks()
         .expect("Error when reading the files from the storage");
-    info!("Files: {:#?}", files);
+    debug!(mock_count = files.len(), "refreshed mock storage");
     res
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     tracing_subscriber::fmt().init();
     let args = Args::parse();
     info!("Tracing subscriber initialized");
     let config = Config {
-        destination: args.destination,
+        destination: parse_destination(&args.destination)
+            .wrap_err("Invalid value for --destination")?,
         mock_dir: args.mock_dir,
     };
     let storage = Arc::new(Mutex::new(
@@ -187,8 +193,7 @@ async fn main() {
         .route("/{*wildcard}", any(handle_request))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port))
-        .await
-        .unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
+    axum::serve(listener, app).await?;
+    Ok(())
 }
