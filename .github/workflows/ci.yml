@@ -5,6 +5,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  schedule:
+    - cron: "17 8 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -16,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: cargo fmt --check
@@ -26,17 +28,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy --all-targets --all-features -- -D warnings -D dead-code
 
   test:
     name: cargo test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: cargo test
@@ -46,29 +48,69 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: cargo build --all-targets
+
+  cargo-dependencies:
+    name: Cargo dependencies are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install cargo-outdated
+        run: cargo install --locked cargo-outdated --version 0.19.0 --features vendored-openssl
+      - name: Check direct dependency versions
+        run: cargo outdated --root-deps-only --exit-code 1
+      - name: Check Cargo.lock
+        run: |
+          cargo update
+          git diff --exit-code -- Cargo.lock
 
   nix:
     name: nix build
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771 # v31
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
       - run: nix build --print-build-logs
+
+  nix-dependencies:
+    name: Nix dependencies are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      - name: Check flake.lock
+        run: |
+          nix flake update
+          git diff --exit-code -- flake.lock
 
   docker-image:
     name: nix build .#dockerImage
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771 # v31
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
       - run: nix build .#dockerImage --print-build-logs
+      - name: Load image
+        run: docker load --input result
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: erm:0.1.0
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
