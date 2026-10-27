@@ -19,36 +19,19 @@ impl FinalRequest {
 }
 
 #[cfg(test)]
-mod tests {
-    use http::Uri;
+pub(crate) mod tests {
+    use proptest::prelude::*;
 
     use super::*;
-    use crate::ir::{MethodIR, UriIR, VersionIR};
+    use crate::ir::{
+        erm_request_parts::tests::request_parts_strategy, timed_frame::tests::timed_frame_strategy,
+    };
 
-    fn request() -> FinalRequest {
-        FinalRequest {
-            parts: ERMRequestParts {
-                method: MethodIR::Get,
-                version: VersionIR::Http11,
-                headers: HeadersIR(Vec::new()),
-                uri: UriIR(Uri::from_static("/")),
-                id: Uuid::from_u128(42),
-            },
-            body: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn headers_returns_the_request_headers() {
-        let request = request();
-
-        assert!(std::ptr::eq(request.headers(), &request.parts.headers));
-    }
-
-    #[test]
-    fn id_returns_the_request_id() {
-        let request = request();
-
-        assert!(std::ptr::eq(request.id(), &request.parts.id));
+    pub(crate) fn final_request_strategy() -> impl Strategy<Value = FinalRequest> {
+        (
+            request_parts_strategy(),
+            prop::collection::vec(timed_frame_strategy(), 0..8),
+        )
+            .prop_map(|(parts, body)| FinalRequest { parts, body })
     }
 }

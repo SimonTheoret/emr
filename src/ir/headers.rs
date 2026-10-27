@@ -44,8 +44,18 @@ impl From<HeadersIR> for HeaderMap {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+    use crate::ir::{
+        header_name::tests::header_name_strategy, header_value::tests::header_value_strategy,
+    };
+
+    pub(crate) fn headers_strategy() -> impl Strategy<Value = HeadersIR> {
+        prop::collection::vec((header_name_strategy(), header_value_strategy()), 0..32)
+            .prop_map(HeadersIR)
+    }
 
     #[test]
     fn converts_an_empty_header_map_to_ir() {

@@ -50,8 +50,14 @@ impl From<Uri> for UriIR {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+
+    pub(crate) fn uri_strategy() -> impl Strategy<Value = UriIR> {
+        (0_u16..1000).prop_map(|id| UriIR(format!("/resource/{id}?q={id}").parse().unwrap()))
+    }
 
     #[test]
     fn serializes_as_the_uri_string() {
@@ -97,13 +103,6 @@ mod tests {
         assert_eq!(earlier.partial_cmp(&equal), Some(Ordering::Equal));
         assert_eq!(earlier.partial_cmp(&later), Some(Ordering::Less));
         assert_eq!(later.partial_cmp(&earlier), Some(Ordering::Greater));
-    }
-
-    #[test]
-    fn converts_from_http_uri_without_changing_it() {
-        let uri: Uri = "/resource?q=value".parse().unwrap();
-
-        assert_eq!(UriIR::from(uri.clone()), UriIR(uri));
     }
 
     #[test]

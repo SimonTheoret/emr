@@ -45,8 +45,16 @@ impl PartialEq<Bytes> for HeaderNameIR {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+
+    pub(crate) fn header_name_strategy() -> impl Strategy<Value = HeaderNameIR> {
+        prop::collection::vec(0_u8..=127, 0..64)
+            .prop_map(Bytes::from)
+            .prop_map(HeaderNameIR::new)
+    }
 
     #[test]
     fn new_lowercases_ascii_letters() {
@@ -129,13 +137,13 @@ mod tests {
         assert_eq!(name, Bytes::from_static(b"x-test"));
     }
 
-    #[test]
-    fn normalized_name_round_trips_through_ron() {
-        let name = HeaderNameIR::new(Bytes::from_static(b"X-Test"));
+    proptest! {
+        #[test]
+        fn normalized_ascii_name_round_trips_through_ron(name in header_name_strategy()) {
+            let serialized = ron::to_string(&name).unwrap();
+            let deserialized: HeaderNameIR = ron::from_str(&serialized).unwrap();
 
-        let serialized = ron::to_string(&name).unwrap();
-        let deserialized: HeaderNameIR = ron::from_str(&serialized).unwrap();
-
-        assert_eq!(deserialized, name);
+            prop_assert_eq!(deserialized, name);
+        }
     }
 }

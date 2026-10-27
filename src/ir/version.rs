@@ -42,36 +42,36 @@ impl From<VersionIR> for Version {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use proptest::prelude::*;
+
     use super::*;
 
-    #[test]
-    fn converts_every_supported_http_version_to_ir() {
-        let cases = [
-            (Version::HTTP_09, VersionIR::Http09),
-            (Version::HTTP_10, VersionIR::Http10),
-            (Version::HTTP_11, VersionIR::Http11),
-            (Version::HTTP_2, VersionIR::Http2),
-            (Version::HTTP_3, VersionIR::Http3),
-        ];
-
-        for (version, expected) in cases {
-            assert_eq!(VersionIR::from(version), expected);
-        }
+    pub(crate) fn version_strategy() -> impl Strategy<Value = VersionIR> {
+        version_case_strategy().prop_map(|(version, _)| version)
     }
 
-    #[test]
-    fn converts_every_ir_version_to_http() {
-        let cases = [
+    fn version_case_strategy() -> impl Strategy<Value = (VersionIR, Version)> {
+        prop::sample::select(version_cases().to_vec())
+    }
+
+    pub(crate) fn version_cases() -> [(VersionIR, Version); 5] {
+        [
             (VersionIR::Http09, Version::HTTP_09),
             (VersionIR::Http10, Version::HTTP_10),
             (VersionIR::Http11, Version::HTTP_11),
             (VersionIR::Http2, Version::HTTP_2),
             (VersionIR::Http3, Version::HTTP_3),
-        ];
+        ]
+    }
 
-        for (version, expected) in cases {
-            assert_eq!(Version::from(version), expected);
+    proptest! {
+        #[test]
+        fn converts_supported_versions_in_both_directions(
+            (version, http_version) in version_case_strategy()
+        ) {
+            prop_assert_eq!(VersionIR::from(http_version), version);
+            prop_assert_eq!(Version::from(version), http_version);
         }
     }
 }

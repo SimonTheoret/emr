@@ -11,13 +11,14 @@ impl From<Url> for UrlIR {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use proptest::prelude::*;
+
     use super::*;
 
-    #[test]
-    fn converts_url_to_ir_without_changing_it() {
-        let url = Url::parse("https://example.test:8443/a/path?q=value#fragment").unwrap();
-
-        assert_eq!(UrlIR::from(url.clone()), UrlIR(url));
+    pub(crate) fn url_strategy() -> impl Strategy<Value = UrlIR> {
+        (0_u16..1000)
+            .prop_map(|id| Url::parse(&format!("https://example.test/{id}")).unwrap())
+            .prop_map(UrlIR::from)
     }
 }

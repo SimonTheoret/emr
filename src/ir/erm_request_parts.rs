@@ -25,11 +25,33 @@ impl ERMRequestParts {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use axum::body::Body;
     use http::{Method, Request, Version};
+    use proptest::prelude::*;
 
     use super::*;
+    use crate::ir::{
+        headers::tests::headers_strategy, method::tests::method_strategy, uri::tests::uri_strategy,
+        version::tests::version_strategy,
+    };
+
+    pub(crate) fn request_parts_strategy() -> impl Strategy<Value = ERMRequestParts> {
+        (
+            method_strategy(),
+            version_strategy(),
+            headers_strategy(),
+            uri_strategy(),
+            any::<u128>().prop_map(Uuid::from_u128),
+        )
+            .prop_map(|(method, version, headers, uri, id)| ERMRequestParts {
+                method,
+                version,
+                headers,
+                uri,
+                id,
+            })
+    }
 
     #[test]
     fn clone_from_request_copies_all_request_parts() {
@@ -52,6 +74,8 @@ mod tests {
         let headers: http::HeaderMap = parts.headers.into();
         assert_eq!(headers["x-test"], "value");
         assert_eq!(headers.get_all("set-cookie").iter().count(), 2);
+        assert_eq!(headers.keys().count(), 2);
+        assert_eq!(headers.len(), 3);
         assert_eq!(parts.id, id);
     }
 }

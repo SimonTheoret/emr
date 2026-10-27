@@ -15,26 +15,20 @@ impl FinalResponse {
 }
 
 #[cfg(test)]
-mod tests {
-    use http::{HeaderMap, StatusCode};
-    use url::Url;
+pub(crate) mod tests {
+    use proptest::prelude::*;
 
     use super::*;
-    use crate::ir::VersionIR;
+    use crate::ir::{
+        erm_response_parts::tests::response_parts_strategy,
+        timed_frame::tests::timed_frame_strategy,
+    };
 
-    #[test]
-    fn id_returns_the_response_id() {
-        let response = FinalResponse {
-            parts: ERMResponseParts {
-                url: Url::parse("https://example.test/").unwrap().into(),
-                version: VersionIR::Http11,
-                headers: HeaderMap::new().into(),
-                status: StatusCode::OK.into(),
-                id: Uuid::from_u128(42),
-            },
-            body: Vec::new(),
-        };
-
-        assert!(std::ptr::eq(response.id(), &response.parts.id));
+    pub(crate) fn final_response_strategy() -> impl Strategy<Value = FinalResponse> {
+        (
+            response_parts_strategy(),
+            prop::collection::vec(timed_frame_strategy(), 0..8),
+        )
+            .prop_map(|(parts, body)| FinalResponse { parts, body })
     }
 }

@@ -62,39 +62,21 @@ impl From<MethodIR> for Method {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use proptest::prelude::*;
+
     use super::*;
 
-    #[test]
-    fn converts_every_supported_http_method_to_ir() {
-        let cases = [
-            (Method::OPTIONS, MethodIR::Options),
-            (Method::GET, MethodIR::Get),
-            (Method::POST, MethodIR::Post),
-            (Method::PUT, MethodIR::Put),
-            (Method::DELETE, MethodIR::Delete),
-            (Method::HEAD, MethodIR::Head),
-            (Method::TRACE, MethodIR::Trace),
-            (Method::CONNECT, MethodIR::Connect),
-            (Method::PATCH, MethodIR::Patch),
-            (Method::QUERY, MethodIR::Query),
-        ];
-
-        for (method, expected) in cases {
-            assert_eq!(MethodIR::from(method), expected);
-        }
+    pub(crate) fn method_strategy() -> impl Strategy<Value = MethodIR> {
+        method_case_strategy().prop_map(|(method, _)| method)
     }
 
-    #[test]
-    fn an_unknown_http_method_falls_back_to_get() {
-        let custom = Method::from_bytes(b"CUSTOM").unwrap();
-
-        assert_eq!(MethodIR::from(custom), MethodIR::Get);
+    fn method_case_strategy() -> impl Strategy<Value = (MethodIR, Method)> {
+        prop::sample::select(method_cases().to_vec())
     }
 
-    #[test]
-    fn converts_every_ir_method_to_http() {
-        let cases = [
+    fn method_cases() -> [(MethodIR, Method); 10] {
+        [
             (MethodIR::Options, Method::OPTIONS),
             (MethodIR::Get, Method::GET),
             (MethodIR::Post, Method::POST),
@@ -105,10 +87,23 @@ mod tests {
             (MethodIR::Connect, Method::CONNECT),
             (MethodIR::Patch, Method::PATCH),
             (MethodIR::Query, Method::QUERY),
-        ];
+        ]
+    }
 
-        for (method, expected) in cases {
-            assert_eq!(Method::from(method), expected);
+    #[test]
+    fn an_unknown_http_method_falls_back_to_get() {
+        let custom = Method::from_bytes(b"CUSTOM").unwrap();
+
+        assert_eq!(MethodIR::from(custom), MethodIR::Get);
+    }
+
+    proptest! {
+        #[test]
+        fn converts_supported_methods_in_both_directions(
+            (method, http_method) in method_case_strategy()
+        ) {
+            prop_assert_eq!(MethodIR::from(http_method.clone()), method);
+            prop_assert_eq!(Method::from(method), http_method);
         }
     }
 }

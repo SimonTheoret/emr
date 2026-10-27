@@ -53,6 +53,7 @@ mod tests {
     use url::Url;
 
     use super::*;
+    use crate::ir::version::tests::version_cases;
 
     fn response() -> ERMResponse {
         let mut headers = HeaderMap::new();
@@ -106,5 +107,22 @@ mod tests {
             Bytes::from_static(b"second")
         );
         assert!(body.next().await.is_none());
+    }
+
+    #[test]
+    fn into_response_preserves_every_status_and_version() {
+        for code in 100..=999 {
+            for (version, expected_version) in version_cases() {
+                let status = StatusCode::from_u16(code).unwrap();
+                let mut response = response();
+                response.status = status.into();
+                response.version = version;
+
+                let response = response.into_response();
+
+                assert_eq!(response.status(), status);
+                assert_eq!(response.version(), expected_version);
+            }
+        }
     }
 }

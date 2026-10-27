@@ -85,6 +85,7 @@ mod tests {
         let mut request = ERMRequest::from_request(request, sender).await.unwrap();
         let first = request.body.0.next().await.unwrap().unwrap();
         let second = request.body.0.next().await.unwrap().unwrap();
+        assert!(request.body.0.next().await.is_none());
         let first_frame = receiver.try_recv().unwrap();
         let second_frame = receiver.try_recv().unwrap();
 
@@ -93,6 +94,8 @@ mod tests {
         let headers: http::HeaderMap = request.headers.clone().into();
         assert_eq!(headers["x-test"], "value");
         assert_eq!(headers.get_all("set-cookie").iter().count(), 2);
+        assert_eq!(headers.keys().count(), 2);
+        assert_eq!(headers.len(), 3);
         assert_eq!(first, Bytes::from_static(b"first"));
         assert_eq!(second, Bytes::from_static(b"second"));
         assert_eq!(first_frame.content, first);

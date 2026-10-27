@@ -19,8 +19,14 @@ impl From<StatusCodeIR> for StatusCode {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+
+    pub(crate) fn status_code_strategy() -> impl Strategy<Value = StatusCodeIR> {
+        (100_u16..=999).prop_map(|code| StatusCodeIR(NonZeroU16::new(code).unwrap()))
+    }
 
     #[test]
     fn converts_every_valid_status_code_to_ir() {
