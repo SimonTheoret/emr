@@ -69,6 +69,7 @@
           ]
           ++ (with pkgs; [
             pkg-config
+            clippy
             cargo-expand
             cargo-nextest
             cargo-expand
