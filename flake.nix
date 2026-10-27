@@ -72,8 +72,6 @@
             clippy
             cargo-expand
             cargo-nextest
-            cargo-expand
-            cargo-nextest
             cargo-insta
             gdb
           ]);
