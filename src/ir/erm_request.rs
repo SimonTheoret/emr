@@ -5,7 +5,7 @@ use futures::StreamExt;
 use http::request::Parts;
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::{BodyStream, HeadersIR, MethodIR, TimedFrame, VersionIR};
+use super::{BodyStream, HeadersIR, MethodIR, TimedFrame, UriIR, VersionIR};
 
 #[derive(Debug)]
 pub struct ERMRequest {
@@ -13,6 +13,7 @@ pub struct ERMRequest {
     pub method: MethodIR,
     pub version: VersionIR,
     pub headers: HeadersIR,
+    pub uri: UriIR,
 }
 
 impl ERMRequest {
@@ -26,6 +27,7 @@ impl ERMRequest {
             method,
             version,
             headers,
+            uri,
             ..
         } = parts;
         let mut last_frame_time: Option<Instant> = None;
@@ -50,6 +52,7 @@ impl ERMRequest {
             method: method.into(),
             version: version.into(),
             headers: headers.into(),
+            uri: uri.into(),
         })
     }
 }
@@ -91,6 +94,7 @@ mod tests {
 
         assert_eq!(request.method, MethodIR::Post);
         assert_eq!(request.version, VersionIR::Http2);
+        assert_eq!(request.uri.0, "/".parse::<http::Uri>().unwrap());
         let headers: http::HeaderMap = request.headers.clone().into();
         assert_eq!(headers["x-test"], "value");
         assert_eq!(headers.get_all("set-cookie").iter().count(), 2);
