@@ -61,6 +61,7 @@ jobs:
           persist-credentials: false
       - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771 # v31
       - run: nix build --print-build-logs
+      - run: nix build .#checks.x86_64-linux.integration --print-build-logs
 
   docker-image:
     name: nix build .#dockerImage

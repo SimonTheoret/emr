@@ -15,7 +15,11 @@
       flake-utils,
       ...
     }:
-    flake-utils.lib.eachDefaultSystem (
+    flake-utils.lib.eachSystem [
+      "x86_64-linux"
+      "aarch64-linux"
+      "aarch64-darwin"
+    ] (
       system:
       let
 
@@ -30,15 +34,11 @@
           ];
           targets = [ ];
         };
-      in
-      {
-        packages.default = pkgs.pkgsStatic.rustPlatform.buildRustPackage (finalAttrs: {
-          pname = "${name}";
-          version = "${version}";
+        ermPackage = pkgs.pkgsStatic.rustPlatform.buildRustPackage (finalAttrs: {
+          pname = name;
+          inherit version;
           src = ./.;
-          cargoLock = {
-            lockFile = ./Cargo.lock;
-          };
+          cargoLock.lockFile = ./Cargo.lock;
           postInstall = ''
             ${pkgs.binutils}/bin/strip $out/bin/erm
           '';
@@ -48,6 +48,13 @@
             maintainers = [ "simon.theoret99@gmail.com" ];
           };
         });
+        integrationTest = import ./tests/integration {
+          inherit pkgs;
+          erm = ermPackage;
+        };
+      in
+      {
+        packages.default = ermPackage;
 
         packages.dockerImage = pkgs.pkgsStatic.dockerTools.buildLayeredImage {
           name = "${name}";
@@ -75,6 +82,17 @@
             cargo-insta
             gdb
           ]);
+        };
+
+        checks = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          integration = integrationTest;
+        };
+
+        apps = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          integration = {
+            type = "app";
+            program = "${integrationTest.driverInteractive}/bin/nixos-test-driver";
+          };
         };
       }
     );
