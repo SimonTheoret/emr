@@ -5,6 +5,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  schedule:
+    - cron: "0 12 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -63,6 +65,23 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo build --all-targets
 
+  cargo-dependencies:
+    name: Cargo dependencies are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install cargo-outdated
+        run: cargo install --locked cargo-outdated --version 0.19.0 --features vendored-openssl
+      - name: Check direct dependency versions
+        run: cargo outdated --root-deps-only --exit-code 1
+      - name: Check Cargo.lock
+        run: |
+          cargo update
+          git diff --exit-code -- Cargo.lock
+
   nix-build:
     name: build every flake output (${{ matrix.system }})
     runs-on: ${{ matrix.runner }}
@@ -96,3 +115,28 @@ jobs:
       - name: Build integration test
         if: matrix.integration
         run: nix build --no-link --print-build-logs .#checks.${{ matrix.system }}.integration
+      - name: Load Docker image
+        if: matrix.system == 'x86_64-linux'
+        run: docker load --input "$(nix build --no-link --print-out-paths .#packages.${{ matrix.system }}.dockerImage)"
+      - name: Scan Docker image
+        if: matrix.system == 'x86_64-linux'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: erm:0.1.0
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+
+  nix-dependencies:
+    name: Nix dependencies are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31.11.3
+      - name: Check flake.lock
+        run: |
+          nix flake update
+          git diff --exit-code -- flake.lock
