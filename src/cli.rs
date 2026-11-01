@@ -6,7 +6,7 @@ use url::Url;
 #[derive(Debug, Parser)]
 #[command(version="0.1.0", about= "Record and replay proxy", long_about = None)]
 pub struct Args {
-    #[arg(long = "destination", short = 'd', value_parser = parse_destination)]
+    #[arg(long , short, value_parser = parse_destination)]
     pub destination: Url,
     #[arg(short, long, default_value = "mocks")]
     pub mock_dir: PathBuf,
