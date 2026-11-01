@@ -30,7 +30,7 @@ use crate::{
         BodyStream, ERMRequest, ERMRequestParts, ERMResponse, ERMResponseParts, FinalRequest,
         FinalResponse, HeadersIR, Mock, StatusCodeIR, TimedFrame, UrlIR, VersionIR,
     },
-    proxy::{parse_destination, sanitize_headers, upstream_url},
+    proxy::{sanitize_headers, upstream_url},
     storage::MockFileStorage,
 };
 
@@ -169,8 +169,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     info!("Tracing subscriber initialized");
     let config = Config {
-        destination: parse_destination(&args.destination)
-            .wrap_err("Invalid value for --destination")?,
+        destination: args.destination,
         mock_dir: args.mock_dir,
     };
     let storage = Arc::new(Mutex::new(
