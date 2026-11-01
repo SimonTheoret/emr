@@ -21,7 +21,7 @@ fn parse_destination(value: &str) -> Result<Url> {
     if !matches!(destination.scheme(), "http" | "https") {
         bail!("destination must use the http or https scheme");
     }
-    if destination.cannot_be_a_base() || destination.host().is_none() {
+    if destination.cannot_be_a_base() || destination.has_host() {
         bail!("destination must be an absolute URL with a host");
     }
     if destination.query().is_some() || destination.fragment().is_some() {
