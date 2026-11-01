@@ -1,4 +1,3 @@
-use eyre::{Result, bail};
 use http::{HeaderMap, HeaderName, Uri};
 use url::Url;
 
@@ -13,23 +12,6 @@ const HOP_BY_HOP_HEADERS: &[&str] = &[
     "transfer-encoding",
     "upgrade",
 ];
-
-/// Parse and validate the HTTP(S) base URL used for upstream requests.
-pub(crate) fn parse_destination(value: &str) -> Result<Url> {
-    let destination = Url::parse(value)?;
-
-    if !matches!(destination.scheme(), "http" | "https") {
-        bail!("destination must use the http or https scheme");
-    }
-    if destination.cannot_be_a_base() || destination.host().is_none() {
-        bail!("destination must be an absolute URL with a host");
-    }
-    if destination.query().is_some() || destination.fragment().is_some() {
-        bail!("destination must not contain a query or fragment");
-    }
-
-    Ok(destination)
-}
 
 /// Prefix an incoming origin-form path with the destination's base path.
 pub(crate) fn upstream_url(destination: &Url, uri: &Uri) -> Url {
@@ -84,36 +66,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_http_and_https_destinations_with_base_paths() {
-        assert_eq!(
-            parse_destination("http://example.test/api")
-                .unwrap()
-                .as_str(),
-            "http://example.test/api"
-        );
-        assert_eq!(
-            parse_destination("https://example.test:8443/api/")
-                .unwrap()
-                .as_str(),
-            "https://example.test:8443/api/"
-        );
-    }
-
-    #[test]
-    fn rejects_invalid_destination_shapes() {
-        for destination in [
-            "ftp://example.test/api",
-            "https://example.test/api?q=value",
-            "https://example.test/api#fragment",
-            "/relative/path",
-        ] {
-            assert!(parse_destination(destination).is_err(), "{destination}");
-        }
-    }
-
-    #[test]
     fn prefixes_paths_and_preserves_the_incoming_query() {
-        let destination = parse_destination("https://example.test:8443/api/").unwrap();
+        let destination = Url::parse("https://example.test:8443/api/").unwrap();
         let uri = "/v1/a%2Fb?tag=one&tag=&encoded=%2F".parse().unwrap();
 
         let upstream = upstream_url(&destination, &uri);
@@ -126,13 +80,13 @@ mod tests {
 
     #[test]
     fn handles_root_destination_and_request_paths() {
-        let root = parse_destination("http://example.test/").unwrap();
+        let root = Url::parse("http://example.test/").unwrap();
         assert_eq!(
             upstream_url(&root, &"/resource".parse().unwrap()).as_str(),
             "http://example.test/resource"
         );
 
-        let prefixed = parse_destination("http://example.test/api").unwrap();
+        let prefixed = Url::parse("http://example.test/api").unwrap();
         assert_eq!(
             upstream_url(&prefixed, &"/".parse().unwrap()).as_str(),
             "http://example.test/api/"
