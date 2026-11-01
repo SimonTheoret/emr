@@ -115,9 +115,8 @@ impl MockFileStorage {
             paths
         );
         for p in paths.into_iter().filter(|p| {
-            p.extension().is_some_and(|ext| {
-                *ext == *self.serialization_ext && p.try_exists().is_ok_and(|b| b)
-            })
+            p.extension()
+                .is_some_and(|ext| *ext == *self.serialization_ext)
         }) {
             info!("Reloading modified mock at path '{:#?}'", &p);
             self.mocks.remove(&p);
