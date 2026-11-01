@@ -31,7 +31,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - run: cargo clippy --all-targets --all-features
+      - uses: cachix/install-nix-action@v31.11.3
+      - run: nix develop --command cargo clippy --all-targets --all-features
 
   test:
     name: cargo test
@@ -41,7 +42,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - run: cargo test
+      - uses: cachix/install-nix-action@v31.11.3
+      - run: nix develop --command cargo test
 
   build:
     name: cargo build --all-targets (${{ matrix.runner }})
@@ -57,7 +59,17 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - run: cargo build --all-targets
+      - uses: cachix/install-nix-action@v31.11.3
+        if: runner.os == 'Linux'
+      - name: Build with the Flake toolchain
+        if: runner.os == 'Linux'
+        run: nix develop --command cargo build --all-targets
+      - name: Install Windows Rust toolchain
+        if: runner.os == 'Windows'
+        run: rustup toolchain install stable --profile minimal
+      - name: Build on Windows
+        if: runner.os == 'Windows'
+        run: cargo +stable build --all-targets
 
   nix:
     name: build every flake output (${{ matrix.system }})
@@ -84,11 +96,11 @@ jobs:
       - name: Build outputs
         run: |
           nix build --no-link --print-build-logs \
-            .
-            .
-            .
-            .
-            .
+            .#packages.${{ matrix.system }}.default \
+            .#packages.${{ matrix.system }}.static \
+            .#packages.${{ matrix.system }}.dockerImage \
+            .#devShells.${{ matrix.system }}.default \
+            .#formatter.${{ matrix.system }}
       - name: Build integration test
         if: matrix.integration
-        run: nix build --no-link --print-build-logs .
+        run: nix build --no-link --print-build-logs .#checks.${{ matrix.system }}.integration
