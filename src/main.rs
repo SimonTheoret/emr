@@ -38,7 +38,7 @@ const SERIALIZATION_EXTENSION: &str = "ron";
 
 #[derive(Clone)]
 struct Config {
-    destination: url::Url,
+    destination: UrlIR,
     mock_dir: PathBuf,
 }
 
@@ -49,11 +49,11 @@ async fn send_request(
     channel: UnboundedSender<TimedFrame>,
 ) -> Result<ERMResponse> {
     let (client, config) = (state.client, state.config);
-    let destination = upstream_url(&config.destination, &req.uri.0);
+    let destination = upstream_url(&config.destination, &req.uri);
     let mut headers: http::HeaderMap = req.headers.into();
     sanitize_headers(&mut headers);
     let res = client
-        .request(req.method.into(), destination)
+        .request(req.method.into(), destination.0)
         .headers(headers)
         .version(req.version.into())
         .body(reqwest::Body::wrap_stream(req.body.0))

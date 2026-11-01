@@ -3,11 +3,13 @@ use eyre::{Result, bail};
 use std::path::PathBuf;
 use url::Url;
 
+use crate::ir::UrlIR;
+
 #[derive(Debug, Parser)]
 #[command(version="0.1.0", about= "Record and replay proxy", long_about = None)]
 pub struct Args {
     #[arg(long , short, value_parser = parse_destination)]
-    pub destination: Url,
+    pub destination: UrlIR,
     #[arg(short, long, default_value = "mocks")]
     pub mock_dir: PathBuf,
     #[arg(short, default_value = "4321")]
@@ -15,7 +17,7 @@ pub struct Args {
 }
 
 /// Parse and validate the HTTP(S) base URL used for upstream requests.
-fn parse_destination(value: &str) -> Result<Url> {
+fn parse_destination(value: &str) -> Result<UrlIR> {
     let destination = Url::parse(value)?;
 
     if !matches!(destination.scheme(), "http" | "https") {
@@ -34,7 +36,7 @@ fn parse_destination(value: &str) -> Result<Url> {
         bail!("destination must not contain a fragment");
     }
 
-    Ok(destination)
+    Ok(UrlIR(destination))
 }
 
 #[cfg(test)]

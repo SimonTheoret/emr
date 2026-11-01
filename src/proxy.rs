@@ -1,5 +1,6 @@
-use http::{HeaderMap, HeaderName, Uri};
-use url::Url;
+use http::{HeaderMap, HeaderName};
+
+use crate::ir::{UriIR, UrlIR};
 
 const HOP_BY_HOP_HEADERS: &[&str] = &[
     "connection",
@@ -14,9 +15,10 @@ const HOP_BY_HOP_HEADERS: &[&str] = &[
 ];
 
 /// Prefix an incoming origin-form path with the destination's base path.
-pub(crate) fn upstream_url(destination: &Url, uri: &Uri) -> Url {
-    let mut upstream = destination.clone();
-    let mut path = destination.path().trim_end_matches('/').to_owned();
+pub(crate) fn upstream_url(destination: &UrlIR, uri: &UriIR) -> UrlIR {
+    dbg!(uri);
+    let mut upstream: UrlIR = destination.clone();
+    let mut path: String = destination.path().trim_end_matches('/').to_owned();
     path.push_str(uri.path());
     upstream.set_path(&path);
     upstream.set_query(uri.query());
@@ -67,7 +69,7 @@ mod tests {
 
     #[test]
     fn prefixes_paths_and_preserves_the_incoming_query() {
-        let destination = Url::parse("https://example.test:8443/api/").unwrap();
+        let destination = UrlIR::parse("https://example.test:8443/api/").unwrap();
         let uri = "/v1/a%2Fb?tag=one&tag=&encoded=%2F".parse().unwrap();
 
         let upstream = upstream_url(&destination, &uri);
@@ -80,13 +82,13 @@ mod tests {
 
     #[test]
     fn handles_root_destination_and_request_paths() {
-        let root = Url::parse("http://example.test/").unwrap();
+        let root = UrlIR::parse("http://example.test/").unwrap();
         assert_eq!(
             upstream_url(&root, &"/resource".parse().unwrap()).as_str(),
             "http://example.test/resource"
         );
 
-        let prefixed = Url::parse("http://example.test/api").unwrap();
+        let prefixed = UrlIR::parse("http://example.test/api").unwrap();
         assert_eq!(
             upstream_url(&prefixed, &"/".parse().unwrap()).as_str(),
             "http://example.test/api/"
