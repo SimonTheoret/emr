@@ -14,6 +14,11 @@ Go's HTTP server drops ``Transfer-Encoding`` (and ``Trailer`` on chunked
 requests) before go-httpbin sees the headers, so a leak of either cannot be
 observed here; ``src/proxy.rs`` unit-tests those two.
 
+Over TLS, erm and go-httpbin negotiate HTTP/2, and hyper's HTTP/2 client strips
+connection-specific headers itself (``Connection`` and the names it lists,
+``Keep-Alive``, ``Proxy-Connection``, ``Upgrade``, ``TE`` other than
+``trailers``). Only a plain-HTTP pair can attribute those removals to erm.
+
 Every input derives from the printed seed; pass ``--seed`` to reproduce a run.
 """
 
@@ -206,7 +211,7 @@ def send(case: Case) -> tuple[requests.Response, HTTPHeaderDict]:
         # Connect directly even if the environment configures an HTTP proxy.
         session.trust_env = False
         # The case brings its own Connection lines.
-        del session.headers["Connection"]
+        session.headers.pop("Connection", None)
         prepared = session.prepare_request(requests.Request(case.method, case.proxy + case.target, data=data))
         # requests keeps headers in a CaseInsensitiveDict, which cannot hold a
         # name twice. urllib3 writes one line per pair of an HTTPHeaderDict, so
@@ -304,6 +309,7 @@ async def run_all(cases: list[Case], concurrency: int) -> list[list[str] | BaseE
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         tasks = [loop.run_in_executor(pool, check_case, case) for case in cases]
+        # Unlike pool.map, keep going past a case that raises and report it.
         return await asyncio.gather(*tasks, return_exceptions=True)
 
 
