@@ -323,7 +323,7 @@ def parse_args() -> argparse.Namespace:
         help="erm base URL and the destination it forwards to (repeatable)",
     )
     parser.add_argument("--count", type=int, default=100, help="cases per pair (default: %(default)s)")
-    parser.add_argument("--concurrency", type=int, default=32, help="requests in flight (default: %(default)s)")
+    parser.add_argument("--concurrency", type=int, default=16, help="requests in flight (default: %(default)s)")
     parser.add_argument("--seed", type=int, help="seed to reproduce a run (default: random)")
     return parser.parse_args()
 

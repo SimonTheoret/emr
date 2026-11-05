@@ -34,7 +34,8 @@ pkgs.testers.runNixOSTest {
   name = "erm-integration";
 
   # The NixOS test driver's globalTimeout option is expressed in seconds.
-  globalTimeout = 5 * 60;
+  # Without KVM (e.g. aarch64 CI runners), booting the VMs alone takes ~3 minutes.
+  globalTimeout = 10 * 60;
 
   # Allow CI builders without /dev/kvm to run the VMs with QEMU emulation.
   requiredFeatures.kvm = false;
@@ -54,6 +55,9 @@ pkgs.testers.runNixOSTest {
           settings = {
             HOST = "0.0.0.0";
             PORT = upstreamHttpPort;
+            # The 1s/5s defaults trip under QEMU emulation with parallel requests.
+            SRV_READ_HEADER_TIMEOUT = "60s";
+            SRV_READ_TIMEOUT = "60s";
           };
         };
 
@@ -69,6 +73,8 @@ pkgs.testers.runNixOSTest {
               ${lib.getExe pkgs.go-httpbin} \
                 -host 0.0.0.0 \
                 -port ${toString upstreamHttpsPort} \
+                -srv-read-header-timeout 60s \
+                -srv-read-timeout 60s \
                 -https-cert-file ${./certs/server.pem} \
                 -https-key-file ${./certs/server-key.pem}
             '';
