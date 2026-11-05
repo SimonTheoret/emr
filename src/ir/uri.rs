@@ -1,10 +1,34 @@
-use std::cmp::Ordering;
+use eyre::{Context, Report, Result};
+use std::ops::Deref;
+use std::{cmp::Ordering, str::FromStr};
 
 use http::Uri;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UriIR(pub Uri);
+
+impl FromStr for UriIR {
+    type Err = Report;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let uri =
+            Uri::from_str(s).wrap_err_with(|| format!("could not parse `{}` into UriIR", s))?;
+        Ok(UriIR(uri))
+    }
+}
+
+impl UriIR {
+    pub fn parse(s: &str) -> Result<Self> {
+        Self::from_str(s)
+    }
+}
+
+impl Deref for UriIR {
+    type Target = Uri;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl Serialize for UriIR {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

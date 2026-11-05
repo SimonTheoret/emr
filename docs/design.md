@@ -105,9 +105,7 @@ Each completed request/response pair should be stored in one versioned `exchange
 
 ## Known Limits of the Current Implementation
 
-- The incoming path and query are recorded but not appended to the configured destination when forwarding.
 - Replay and matching are not wired into request handling.
-- Header reconstruction uses replacement semantics, collapsing repeated values.
 - Body capture uses unbounded channels and buffers complete exchanges before writing, so memory is unbounded.
 - Serializer task failures are detached and not surfaced.
 - Bad RON can fail startup or panic request handling.
@@ -118,13 +116,12 @@ Each completed request/response pair should be stored in one versioned `exchange
 
 ## Open Decisions
 
-1. **Forwarding semantics:** should the incoming path/query replace, append to, or resolve against the destination URL?
-2. **Strict interface:** should strictness be a `--strict` flag, a subcommand, or configuration? What diagnostic response body should a miss contain?
-3. **Validation response:** what diagnostic response body should a missing or invalid `x-erm-match` value contain?
-4. **Duplicate keys:** should loading reject duplicate `x-erm-match` values, or should a documented ordering rule select one?
-5. **Timing:** reproduce recorded delays by default, make them optional, or allow a speed multiplier?
-6. **Format compatibility:** what migration policy applies when the exchange schema version changes?
-7. **Safety limits:** what maximum body size, frame count, delay, and concurrent recording count should be enforced?
+1. **Strict interface:** should strictness be a `--strict` flag, a subcommand, or configuration? What diagnostic response body should a miss contain?
+2. **Validation response:** what diagnostic response body should a missing or invalid `x-erm-match` value contain?
+3. **Duplicate keys:** should loading reject duplicate `x-erm-match` values, or should a documented ordering rule select one?
+4. **Timing:** reproduce recorded delays by default, make them optional, or allow a speed multiplier?
+5. **Format compatibility:** what migration policy applies when the exchange schema version changes?
+6. **Safety limits:** what maximum body size, frame count, delay, and concurrent recording count should be enforced?
 
 ## Confirmed Decisions
 
@@ -135,6 +132,8 @@ Each completed request/response pair should be stored in one versioned `exchange
 - A missing `x-erm-match` header is always an error and is never proxied or recorded.
 - A missing or invalid match header returns `400 Bad Request`; an unknown key in strict mode returns `404 Not Found`.
 - A completed exchange is persisted as one atomic, versioned file rather than separate request and response files.
+- The destination path prefixes the incoming path, and the incoming query is preserved.
+- ERM removes hop-by-hop headers at each network boundary while retaining the decoded input headers in recordings.
 
 ## Suggested Delivery Order
 

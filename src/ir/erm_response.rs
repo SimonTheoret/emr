@@ -3,6 +3,7 @@ use http::HeaderMap;
 use uuid::Uuid;
 
 use super::{BodyStream, ERMResponseParts, HeadersIR, StatusCodeIR, UrlIR, VersionIR};
+use crate::proxy::sanitize_headers;
 
 #[derive(Debug)]
 pub struct ERMResponse {
@@ -34,8 +35,9 @@ impl IntoResponse for ERMResponse {
         let response_headers = incomplete_response
             .headers_mut()
             .expect("Error when fetching the headers from ERMResponse");
-        let current_headers: HeaderMap = self.headers.into();
-        response_headers.extend(current_headers);
+        let mut current_headers: HeaderMap = self.headers.into();
+        sanitize_headers(&mut current_headers);
+        *response_headers = current_headers;
         incomplete_response
             .body(axum::body::Body::from_stream(self.body.0))
             .expect("Error when building a response")
