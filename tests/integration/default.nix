@@ -6,6 +6,7 @@ let
   upstreamHttpsPort = 8443;
   ermHttpPort = 4321;
   ermHttpsPort = 4322;
+  pythonEnv = pkgs.python3.withPackages (ps: [ ps.requests ]);
 
   mkErmService =
     {
@@ -113,7 +114,7 @@ pkgs.testers.runNixOSTest {
     proxy = {
       virtualisation.memorySize = 512;
       security.pki.certificateFiles = [ ./certs/ca.pem ];
-      environment.systemPackages = [ pkgs.curl ];
+      environment.systemPackages = [ pythonEnv ];
 
       systemd.services = {
         erm-http = mkErmService {
@@ -131,8 +132,6 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
-    import json
-
     start_all()
 
     upstream.wait_for_unit("go-httpbin.service")
@@ -145,36 +144,11 @@ pkgs.testers.runNixOSTest {
     proxy.wait_for_open_port(${toString ermHttpPort})
     proxy.wait_for_open_port(${toString ermHttpsPort})
 
-    for scheme, proxy_port, upstream_port in [
-        ("http", ${toString ermHttpPort}, ${toString upstreamHttpPort}),
-        ("https", ${toString ermHttpsPort}, ${toString upstreamHttpsPort}),
-    ]:
-        response = proxy.succeed(
-            "curl --fail --silent --show-error "
-            "--request POST "
-            "--header 'Content-Type: text/plain' "
-            "--header 'X-Test: value' "
-            "--header 'X-Repeat: first' "
-            "--header 'X-Repeat: second' "
-            "--header 'Connection: x-remove-me' "
-            "--header 'X-Remove-Me: secret' "
-            "--data 'echo-body' "
-            f"http://127.0.0.1:{proxy_port}/anything/echo?value=one"
-        )
-        document = json.loads(response)
-        headers = {
-            name.lower(): values for name, values in document["headers"].items()
-        }
-
-        assert document["method"] == "POST"
-        assert document["url"] == (
-            f"{scheme}://upstream:{upstream_port}/anything/echo?value=one"
-        )
-        assert document["data"] == "echo-body"
-        assert headers["host"] == [f"upstream:{upstream_port}"]
-        assert headers["x-test"] == ["value"]
-        assert headers["x-repeat"] == ["first", "second"]
-        assert "connection" not in headers
-        assert "x-remove-me" not in headers
+    # Random requests through both proxies, compared against go-httpbin's echo.
+    proxy.succeed(
+        "python3 ${./echo.py} "
+        "--pair http://127.0.0.1:${toString ermHttpPort} http://upstream:${toString upstreamHttpPort} "
+        "--pair http://127.0.0.1:${toString ermHttpsPort} https://upstream:${toString upstreamHttpsPort}"
+    )
   '';
 }
