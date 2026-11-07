@@ -28,7 +28,9 @@
           version = "0.1.0";
           overlays = [ (import rust-overlay) ];
           pkgs = import nixpkgs { inherit system overlays; };
-          rust = pkgs.rust-bin.stable.latest.default.override {
+          # Keep in sync with RUST_VERSION in .github/workflows/ci.yml.
+          rustVersion = "1.99.1";
+          rust = pkgs.rust-bin.stable.${rustVersion}.default.override {
             extensions = [
               "rust-src"
               "rust-analyzer"

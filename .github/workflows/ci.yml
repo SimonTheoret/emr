@@ -12,16 +12,22 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  # Keep in sync with rustVersion in flake.nix.
+  RUST_VERSION: "1.99.1"
+
 jobs:
   fmt:
     name: format
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
       - name: Verify Rust, Nix, and shell formatting
         run: nix develop --command just format-check
 
@@ -30,10 +36,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
       - run: nix develop --command cargo clippy --all-targets --all-features
 
   test:
@@ -41,10 +47,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
       - run: nix develop --command cargo test
 
   windows-build:
@@ -57,10 +63,12 @@ jobs:
         runner:
           - windows-latest
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
       - name: Build on Windows
         if: runner.os == 'Windows'
         run: cargo build --all-targets
@@ -71,9 +79,12 @@ jobs:
     timeout-minutes: 30
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
       - name: Install cargo-outdated
         run: cargo install --locked cargo-outdated --version 0.19.0 --features vendored-openssl
       - name: Check direct dependency versions
@@ -87,6 +98,9 @@ jobs:
     needs: [fmt, clippy, test]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write # purge old Nix store caches
     strategy:
       fail-fast: false
       matrix:
@@ -98,10 +112,22 @@ jobs:
           - system: aarch64-darwin
             runner: macos-26
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-${{ github.job }}-${{ matrix.system }}-
+          gc-max-store-size-linux: 1G
+          gc-max-store-size-macos: 1G
+          purge: true
+          purge-prefixes: nix-${{ github.job }}-${{ matrix.system }}-
+          purge-created: 3600
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
       - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.default
 
   static:
@@ -109,6 +135,9 @@ jobs:
     needs: [fmt, clippy, test]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write # purge old Nix store caches
     strategy:
       fail-fast: false
       matrix:
@@ -120,10 +149,22 @@ jobs:
           - system: aarch64-darwin
             runner: macos-26
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-${{ github.job }}-${{ matrix.system }}-
+          gc-max-store-size-linux: 1G
+          gc-max-store-size-macos: 1G
+          purge: true
+          purge-prefixes: nix-${{ github.job }}-${{ matrix.system }}-
+          purge-created: 3600
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
       - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.static
 
   integration:
@@ -131,6 +172,9 @@ jobs:
     needs: [package, static]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write # purge old Nix store caches
     strategy:
       fail-fast: false
       matrix:
@@ -142,10 +186,22 @@ jobs:
           - system: aarch64-linux
             runner: ubuntu-26.04-arm
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      # Both checks of a system share one cache; whichever leg finishes first saves it.
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-${{ github.job }}-${{ matrix.system }}-
+          gc-max-store-size-linux: 1G
+          purge: true
+          purge-prefixes: nix-${{ github.job }}-${{ matrix.system }}-
+          purge-created: 3600
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
       - run: nix build --no-link --print-build-logs .#checks.${{ matrix.system }}.${{ matrix.check }}
 
   docker-image:
@@ -162,14 +218,14 @@ jobs:
           - system: aarch64-linux
             runner: ubuntu-26.04-arm
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
       - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.dockerImage
       - name: Export image for scanning
         run: cp "$(nix build --no-link --print-out-paths .#packages.${{ matrix.system }}.dockerImage)" erm-image.tar.gz
-      - uses: actions/upload-artifact@v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: erm-image-${{ matrix.system }}
           path: erm-image.tar.gz
@@ -189,13 +245,13 @@ jobs:
           - system: aarch64-linux
             runner: ubuntu-26.04-arm
     steps:
-      - uses: actions/download-artifact@v8.0.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: erm-image-${{ matrix.system }}
       - name: Load image
         run: docker load --input erm-image.tar.gz
       - name: Scan image
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: erm:0.1.0
           severity: CRITICAL,HIGH
@@ -208,10 +264,10 @@ jobs:
     timeout-minutes: 30
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
       - name: Check flake.lock
         run: |
           nix flake update
