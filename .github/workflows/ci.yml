@@ -15,8 +15,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
-  # Must match rustVersion in flake.nix; the flake's rust-version check enforces it.
-  RUST_VERSION: "1.99.0"
 
 jobs:
   fmt:
@@ -66,9 +64,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup toolchain install
       - name: Build on Windows
         if: runner.os == 'Windows'
         run: cargo build --all-targets
@@ -82,9 +79,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup toolchain install
       - name: Install cargo-outdated
         run: cargo install --locked cargo-outdated --version 0.19.0 --features vendored-openssl
       - name: Check direct dependency versions
@@ -128,8 +124,6 @@ jobs:
           purge-created: 3600
           purge-last-accessed: P1DT12H
           purge-primary-key: never
-      - name: Check Rust version matches nixpkgs and CI
-        run: nix build --no-link --print-build-logs .#checks.${{ matrix.system }}.rust-version
       - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.default
 
   static:

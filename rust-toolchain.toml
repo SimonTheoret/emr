@@ -1,0 +1,7 @@
+# The Rust toolchain for this repository: the Nix dev shell and default package
+# (through rust-overlay) and rustup in CI read this file. The static package is
+# built with nixpkgs' own static Rust platform.
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["clippy", "rust-analyzer", "rust-src", "rustfmt"]

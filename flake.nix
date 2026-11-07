@@ -3,12 +3,17 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs =
     {
       nixpkgs,
+      rust-overlay,
       flake-utils,
       ...
     }:
@@ -24,18 +29,23 @@
 
           name = "erm";
           version = "0.1.0";
-          pkgs = import nixpkgs { inherit system; };
-          # nixpkgs' rustc builds the packages and is the dev shell's toolchain. This
-          # must match it and RUST_VERSION in .github/workflows/ci.yml; the
-          # rust-version check enforces both.
-          rustVersion = "1.99.0";
+          overlays = [ (import rust-overlay) ];
+          pkgs = import nixpkgs { inherit system overlays; };
+          # The toolchain pinned in rust-toolchain.toml, used by the dev shell and to
+          # build the default package. The static package uses nixpkgs' static
+          # Rust platform.
+          rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rust;
+            rustc = rust;
+          };
           meta = {
             description = "Record and replay proxy";
             license = pkgs.lib.licenses.mit;
             mainProgram = name;
             maintainers = [ "simon.theoret99@gmail.com" ];
           };
-          ermPackage = pkgs.rustPlatform.buildRustPackage (finalAttrs: {
+          ermPackage = rustPlatform.buildRustPackage (finalAttrs: {
             pname = name;
             inherit version;
             src = ./.;
@@ -84,12 +94,10 @@
           };
 
           devShells.default = pkgs.mkShell {
-            buildInputs = with pkgs; [
-              rustc
-              cargo
-              clippy
-              rustfmt
-              rust-analyzer
+            buildInputs = [
+              rust
+            ]
+            ++ (with pkgs; [
               pkg-config
               cargo-expand
               cargo-nextest
@@ -99,25 +107,12 @@
               gdb
               just
               shfmt
-            ];
+            ]);
           };
 
           formatter = pkgs.nixfmt;
 
-          checks = {
-            rust-version = pkgs.runCommand "rust-version" { } ''
-              if [ "${pkgs.rustc.version}" != "${rustVersion}" ]; then
-                echo "nixpkgs ships rustc ${pkgs.rustc.version}, but rustVersion is ${rustVersion}; update rustVersion in flake.nix" >&2
-                exit 1
-              fi
-              if ! grep -qF 'RUST_VERSION: "${rustVersion}"' ${./.github/workflows/ci.yml}; then
-                echo "RUST_VERSION in .github/workflows/ci.yml does not match rustVersion ${rustVersion}" >&2
-                exit 1
-              fi
-              touch $out
-            '';
-          }
-          // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          checks = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             integration = integrationTest;
             integration-static = integrationTestStatic;
           };
