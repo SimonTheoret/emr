@@ -3,14 +3,12 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs =
     {
       nixpkgs,
-      rust-overlay,
       flake-utils,
       ...
     }:
@@ -26,18 +24,11 @@
 
           name = "erm";
           version = "0.1.0";
-          overlays = [ (import rust-overlay) ];
-          pkgs = import nixpkgs { inherit system overlays; };
-          # Must match nixpkgs' rustc (used to build the packages) and RUST_VERSION in
-          # .github/workflows/ci.yml; the rust-version check enforces both.
+          pkgs = import nixpkgs { inherit system; };
+          # nixpkgs' rustc builds the packages and is the dev shell's toolchain. This
+          # must match it and RUST_VERSION in .github/workflows/ci.yml; the
+          # rust-version check enforces both.
           rustVersion = "1.99.0";
-          rust = pkgs.rust-bin.stable.${rustVersion}.default.override {
-            extensions = [
-              "rust-src"
-              "rust-analyzer"
-            ];
-            targets = [ ];
-          };
           meta = {
             description = "Record and replay proxy";
             license = pkgs.lib.licenses.mit;
@@ -93,12 +84,13 @@
           };
 
           devShells.default = pkgs.mkShell {
-            buildInputs = [
-              rust
-            ]
-            ++ (with pkgs; [
-              pkg-config
+            buildInputs = with pkgs; [
+              rustc
+              cargo
               clippy
+              rustfmt
+              rust-analyzer
+              pkg-config
               cargo-expand
               cargo-nextest
               cargo-insta
@@ -107,7 +99,7 @@
               gdb
               just
               shfmt
-            ]);
+            ];
           };
 
           formatter = pkgs.nixfmt;
