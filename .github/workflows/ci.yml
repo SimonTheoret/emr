@@ -168,24 +168,30 @@ jobs:
       - uses: cachix/install-nix-action@v31.11.3
       - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.dockerImage
       - name: Export image for scanning
-        if: matrix.system == 'x86_64-linux'
         run: cp "$(nix build --no-link --print-out-paths .#packages.${{ matrix.system }}.dockerImage)" erm-image.tar.gz
       - uses: actions/upload-artifact@v7.0.2
-        if: matrix.system == 'x86_64-linux'
         with:
-          name: erm-image-x86_64-linux
+          name: erm-image-${{ matrix.system }}
           path: erm-image.tar.gz
           retention-days: 1
 
   image-scan:
-    name: scan docker image
+    name: scan docker image (${{ matrix.system }})
     needs: docker-image
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-26.04
+          - system: aarch64-linux
+            runner: ubuntu-26.04-arm
     steps:
       - uses: actions/download-artifact@v8.0.2
         with:
-          name: erm-image-x86_64-linux
+          name: erm-image-${{ matrix.system }}
       - name: Load image
         run: docker load --input erm-image.tar.gz
       - name: Scan image
