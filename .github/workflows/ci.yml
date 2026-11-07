@@ -16,10 +16,6 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
-# Stages: fmt, actionlint, clippy and test first; then the Nix packages and the
-# Windows and macOS builds; then the integration tests and Docker images.
-# Steps used by several jobs are defined once as YAML anchors (&name) where they
-# first appear, and reused as aliases (*name).
 jobs:
   fmt:
     name: format
@@ -27,7 +23,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      actions: write # purge old Nix store caches
+      actions: write
     steps:
       - &checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,9 +31,6 @@ jobs:
           persist-credentials: false
       - &install-nix
         uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      # Every job that enters the dev shell shares one Nix store cache. Those jobs run
-      # `nix develop --profile`, which roots the dev shell so it survives the cache's
-      # garbage collection.
       - &devshell-cache
         name: Restore and save Nix store
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
@@ -59,7 +52,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      actions: write # purge old Nix store caches
+      actions: write
     steps:
       - *checkout
       - *install-nix
@@ -73,12 +66,11 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      actions: write # purge old Nix store caches
+      actions: write
     steps:
       - *checkout
       - *install-nix
       - *devshell-cache
-      # The Cargo registry and target/, per job and runner platform.
       - &cargo-cache
         name: Restore and save Cargo build output
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -97,7 +89,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      actions: write # purge old Nix store caches
+      actions: write
     steps:
       - *checkout
       - *install-nix
@@ -131,7 +123,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      actions: write # purge old Nix store caches
+      actions: write
     steps:
       - *checkout
       - *install-nix
@@ -146,7 +138,6 @@ jobs:
           purge-created: 3600
           purge-last-accessed: P1DT12H
           purge-primary-key: never
-      # The out-link roots the package, so it survives the cache's garbage collection.
       - run: nix build --out-link result --print-build-logs .#packages.aarch64-darwin.default
 
   cargo-dependencies:
@@ -156,7 +147,7 @@ jobs:
     continue-on-error: true
     permissions:
       contents: read
-      actions: write # purge old Nix store caches
+      actions: write
     steps:
       - *checkout
       - *install-nix
@@ -174,7 +165,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      actions: write # purge old Nix store caches
+      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -188,8 +179,6 @@ jobs:
     steps:
       - *checkout
       - *install-nix
-      # One Nix store cache per package and system, restored again by the integration
-      # test of that package.
       - &package-cache
         name: Restore and save Nix store
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
@@ -202,8 +191,6 @@ jobs:
           purge-created: 3600
           purge-last-accessed: P1DT12H
           purge-primary-key: never
-      # The out-link roots the package, so it survives the cache's garbage collection
-      # and the integration test restores it instead of rebuilding.
       - run: nix build --out-link result --print-build-logs .#packages.${{ matrix.system }}.${{ matrix.package }}
 
   integration:
@@ -213,7 +200,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      actions: write # purge old Nix store caches
+      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -224,7 +211,6 @@ jobs:
             runner: ubuntu-26.04
           - system: aarch64-linux
             runner: ubuntu-26.04-arm
-          # The package under test, whose Nix store cache this job restores.
           - check: integration
             package: default
           - check: integration-static
