@@ -65,6 +65,10 @@
             inherit pkgs;
             erm = ermPackage;
           };
+          integrationTestStatic = import ./tests/integration {
+            inherit pkgs;
+            erm = ermPackageStatic;
+          };
         in
         {
           packages.default = ermPackage;
@@ -107,6 +111,7 @@
 
           checks = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             integration = integrationTest;
+            integration-static = integrationTestStatic;
           };
 
           apps = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
