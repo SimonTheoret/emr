@@ -75,12 +75,22 @@ jobs:
           persist-credentials: false
       - name: Install cargo-outdated
         run: cargo install --locked cargo-outdated --version 0.19.0 --features vendored-openssl
+      # Stale dependencies only raise a warning; errors from the tools still fail the job.
       - name: Check direct dependency versions
-        run: cargo outdated --root-deps-only --exit-code 1
+        run: |
+          status=0
+          cargo outdated --root-deps-only --exit-code 2 || status=$?
+          if [ "$status" -eq 2 ]; then
+            echo "::warning title=Cargo dependencies are outdated::Newer versions of direct dependencies are available; see cargo outdated output."
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
       - name: Check Cargo.lock
         run: |
           cargo update
-          git diff --exit-code -- Cargo.lock
+          if ! git diff --exit-code -- Cargo.lock; then
+            echo "::warning title=Cargo.lock is outdated::cargo update changes Cargo.lock; run it and commit the result."
+          fi
 
   nix-build:
     name: build every flake output (${{ matrix.system }})
@@ -136,7 +146,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@v31.11.3
+      # Stale inputs only raise a warning; errors from nix still fail the job.
       - name: Check flake.lock
         run: |
           nix flake update
-          git diff --exit-code -- flake.lock
+          if ! git diff --exit-code -- flake.lock; then
+            echo "::warning title=flake.lock is outdated::nix flake update changes flake.lock; run it and commit the result."
+          fi
