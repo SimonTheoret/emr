@@ -32,20 +32,22 @@
           overlays = [ (import rust-overlay) ];
           pkgs = import nixpkgs { inherit system overlays; };
           # The toolchain pinned in rust-toolchain.toml, used by the dev shell and to
-          # build the default package. The static package uses nixpkgs' static
-          # Rust platform.
+          # build the default package.
           rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           rustPlatform = pkgs.makeRustPlatform {
             cargo = rust;
             rustc = rust;
           };
+          # nixpkgs' own static (musl) Rust platform: building the static package with
+          # the toolchain above makes its build scripts crash.
+          staticRustPlatform = pkgs.pkgsStatic.rustPlatform;
           meta = {
             description = "Record and replay proxy";
             license = pkgs.lib.licenses.mit;
             mainProgram = name;
             maintainers = [ "simon.theoret99@gmail.com" ];
           };
-          ermPackage = rustPlatform.buildRustPackage (finalAttrs: {
+          ermPackage = rustPlatform.buildRustPackage {
             pname = name;
             inherit version;
             src = ./.;
@@ -54,8 +56,8 @@
               ${pkgs.binutils}/bin/strip --strip-unneeded $out/bin/erm
             '';
             inherit meta;
-          });
-          ermPackageStatic = pkgs.pkgsStatic.rustPlatform.buildRustPackage (finalAttrs: {
+          };
+          ermPackageStatic = staticRustPlatform.buildRustPackage {
             pname = name;
             inherit version;
             src = ./.;
@@ -64,7 +66,7 @@
               ${pkgs.binutils}/bin/strip --strip-unneeded $out/bin/erm
             '';
             inherit meta;
-          });
+          };
           integrationTest = import ./tests/integration {
             inherit pkgs;
             erm = ermPackage;
@@ -95,6 +97,8 @@
 
           devShells.default = pkgs.mkShell {
             buildInputs = [
+              # Provides cargo, rustc, clippy, rustfmt, rust-analyzer and rust-src from
+              # rust-toolchain.toml; nixpkgs' clippy would be built for nixpkgs' rustc.
               rust
             ]
             ++ (with pkgs; [
