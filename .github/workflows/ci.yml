@@ -18,6 +18,8 @@ env:
 
 # Stages: fmt, actionlint, clippy and test first; then the Nix packages and the
 # Windows and macOS builds; then the integration tests and Docker images.
+# Steps used by several jobs are defined once as YAML anchors (&name) where they
+# first appear, and reused as aliases (*name).
 jobs:
   fmt:
     name: format
@@ -27,12 +29,17 @@ jobs:
       contents: read
       actions: write # purge old Nix store caches
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - &checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      # Every job that enters the dev shell shares one Nix store cache.
-      - name: Restore and save Nix store
+      - &install-nix
+        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      # Every job that enters the dev shell shares one Nix store cache. Those jobs run
+      # `nix develop --profile`, which roots the dev shell so it survives the cache's
+      # garbage collection.
+      - &devshell-cache
+        name: Restore and save Nix store
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
           primary-key: nix-devshell-${{ hashFiles('**/*.nix', '**/flake.lock', 'rust-toolchain.toml') }}
@@ -43,7 +50,6 @@ jobs:
           purge-created: 3600
           purge-last-accessed: P1DT12H
           purge-primary-key: never
-      # The profile roots the dev shell, so it survives the cache's garbage collection.
       - name: Verify Rust, Nix, and shell formatting
         run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command just format-check
 
@@ -55,23 +61,9 @@ jobs:
       contents: read
       actions: write # purge old Nix store caches
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      # Every job that enters the dev shell shares one Nix store cache.
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
-        with:
-          primary-key: nix-devshell-${{ hashFiles('**/*.nix', '**/flake.lock', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-devshell-
-          gc-max-store-size-linux: 1G
-          purge: true
-          purge-prefixes: nix-devshell-
-          purge-created: 3600
-          purge-last-accessed: P1DT12H
-          purge-primary-key: never
-      # The profile roots the dev shell, so it survives the cache's garbage collection.
+      - *checkout
+      - *install-nix
+      - *devshell-cache
       - name: Lint GitHub Actions workflows
         run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command actionlint -color
 
@@ -83,32 +75,20 @@ jobs:
       contents: read
       actions: write # purge old Nix store caches
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      # Every job that enters the dev shell shares one Nix store cache.
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
-        with:
-          primary-key: nix-devshell-${{ hashFiles('**/*.nix', '**/flake.lock', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-devshell-
-          gc-max-store-size-linux: 1G
-          purge: true
-          purge-prefixes: nix-devshell-
-          purge-created: 3600
-          purge-last-accessed: P1DT12H
-          purge-primary-key: never
-      - name: Restore and save Cargo build output
+      - *checkout
+      - *install-nix
+      - *devshell-cache
+      # The Cargo registry and target/, per job and runner platform.
+      - &cargo-cache
+        name: Restore and save Cargo build output
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ github.job }}-${{ hashFiles('Cargo.lock', 'flake.lock', 'rust-toolchain.toml') }}
-          restore-keys: cargo-${{ github.job }}-
-      # The profile roots the dev shell, so it survives the cache's garbage collection.
+          key: cargo-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'flake.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
       - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo clippy --all-targets --all-features
 
   test:
@@ -119,32 +99,10 @@ jobs:
       contents: read
       actions: write # purge old Nix store caches
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      # Every job that enters the dev shell shares one Nix store cache.
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
-        with:
-          primary-key: nix-devshell-${{ hashFiles('**/*.nix', '**/flake.lock', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-devshell-
-          gc-max-store-size-linux: 1G
-          purge: true
-          purge-prefixes: nix-devshell-
-          purge-created: 3600
-          purge-last-accessed: P1DT12H
-          purge-primary-key: never
-      - name: Restore and save Cargo build output
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ github.job }}-${{ hashFiles('Cargo.lock', 'flake.lock', 'rust-toolchain.toml') }}
-          restore-keys: cargo-${{ github.job }}-
-      # The profile roots the dev shell, so it survives the cache's garbage collection.
+      - *checkout
+      - *install-nix
+      - *devshell-cache
+      - *cargo-cache
       - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo test
 
   windows-build:
@@ -158,20 +116,10 @@ jobs:
         runner:
           - windows-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      - *checkout
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup toolchain install
-      - name: Restore and save Cargo build output
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ github.job }}-${{ matrix.runner }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: cargo-${{ github.job }}-${{ matrix.runner }}-
+      - *cargo-cache
       - name: Build on Windows
         if: runner.os == 'Windows'
         run: cargo build --all-targets
@@ -185,10 +133,8 @@ jobs:
       contents: read
       actions: write # purge old Nix store caches
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      - *checkout
+      - *install-nix
       - name: Restore and save Nix store
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
@@ -212,23 +158,9 @@ jobs:
       contents: read
       actions: write # purge old Nix store caches
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      # Every job that enters the dev shell shares one Nix store cache.
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
-        with:
-          primary-key: nix-devshell-${{ hashFiles('**/*.nix', '**/flake.lock', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-devshell-
-          gc-max-store-size-linux: 1G
-          purge: true
-          purge-prefixes: nix-devshell-
-          purge-created: 3600
-          purge-last-accessed: P1DT12H
-          purge-primary-key: never
-      # The profile roots the dev shell, so it survives the cache's garbage collection.
+      - *checkout
+      - *install-nix
+      - *devshell-cache
       - name: Check direct dependency versions
         run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo outdated --root-deps-only --exit-code 1
       - name: Show warning
@@ -236,7 +168,7 @@ jobs:
         run: echo "::warning title=Cargo dependencies check failed::Cargo dependencies are outdated or the check could not run; see the job log."
 
   package:
-    name: nix package (${{ matrix.system }})
+    name: nix ${{ matrix.package }} package (${{ matrix.system }})
     needs: [fmt, actionlint, clippy, test]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -246,70 +178,37 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        system: [x86_64-linux, aarch64-linux]
+        package: [default, static]
         include:
           - system: x86_64-linux
             runner: ubuntu-26.04
           - system: aarch64-linux
             runner: ubuntu-26.04-arm
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      - name: Restore and save Nix store
+      - *checkout
+      - *install-nix
+      # One Nix store cache per package and system, restored again by the integration
+      # test of that package.
+      - &package-cache
+        name: Restore and save Nix store
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
-          primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-${{ github.job }}-${{ matrix.system }}-
+          primary-key: nix-${{ matrix.package }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-${{ matrix.package }}-${{ matrix.system }}-
           gc-max-store-size-linux: 1G
           purge: true
-          purge-prefixes: nix-${{ github.job }}-${{ matrix.system }}-
+          purge-prefixes: nix-${{ matrix.package }}-${{ matrix.system }}-
           purge-created: 3600
           purge-last-accessed: P1DT12H
           purge-primary-key: never
       # The out-link roots the package, so it survives the cache's garbage collection
       # and the integration test restores it instead of rebuilding.
-      - run: nix build --out-link result --print-build-logs .#packages.${{ matrix.system }}.default
-
-  static:
-    name: nix static package (${{ matrix.system }})
-    needs: [fmt, actionlint, clippy, test]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      actions: write # purge old Nix store caches
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - system: x86_64-linux
-            runner: ubuntu-26.04
-          - system: aarch64-linux
-            runner: ubuntu-26.04-arm
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
-        with:
-          primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-${{ github.job }}-${{ matrix.system }}-
-          gc-max-store-size-linux: 1G
-          purge: true
-          purge-prefixes: nix-${{ github.job }}-${{ matrix.system }}-
-          purge-created: 3600
-          purge-last-accessed: P1DT12H
-          purge-primary-key: never
-      # The out-link roots the package, so it survives the cache's garbage collection
-      # and the integration test restores it instead of rebuilding.
-      - run: nix build --out-link result --print-build-logs .#packages.${{ matrix.system }}.static
+      - run: nix build --out-link result --print-build-logs .#packages.${{ matrix.system }}.${{ matrix.package }}
 
   integration:
     name: ${{ matrix.check }} test (${{ matrix.system }})
-    needs: [package, static]
+    needs: package
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -325,32 +224,20 @@ jobs:
             runner: ubuntu-26.04
           - system: aarch64-linux
             runner: ubuntu-26.04-arm
-          # Share the Nix store cache of the job that built the package under test.
+          # The package under test, whose Nix store cache this job restores.
           - check: integration
-            cache: package
+            package: default
           - check: integration-static
-            cache: static
+            package: static
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
-        with:
-          primary-key: nix-${{ matrix.cache }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock', 'rust-toolchain.toml') }}
-          restore-prefixes-first-match: nix-${{ matrix.cache }}-${{ matrix.system }}-
-          gc-max-store-size-linux: 1G
-          purge: true
-          purge-prefixes: nix-${{ matrix.cache }}-${{ matrix.system }}-
-          purge-created: 3600
-          purge-last-accessed: P1DT12H
-          purge-primary-key: never
+      - *checkout
+      - *install-nix
+      - *package-cache
       - run: nix build --no-link --print-build-logs .#checks.${{ matrix.system }}.${{ matrix.check }}
 
   docker-image:
     name: docker image (${{ matrix.system }})
-    needs: static
+    needs: package
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -362,10 +249,8 @@ jobs:
           - system: aarch64-linux
             runner: ubuntu-26.04-arm
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      - *checkout
+      - *install-nix
       - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.dockerImage
       - name: Export image for scanning
         run: cp "$(nix build --no-link --print-out-paths .#packages.${{ matrix.system }}.dockerImage)" erm-image.tar.gz
@@ -408,10 +293,8 @@ jobs:
     timeout-minutes: 30
     continue-on-error: true
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      - *checkout
+      - *install-nix
       - name: Check flake.lock
         run: |
           nix flake update
