@@ -17,9 +17,7 @@ env:
   RUSTFLAGS: "-D warnings"
 
 # Stages: fmt, actionlint, clippy and test first; then the Nix packages and the
-# Windows and macOS builds; then the integration tests and Docker images. Jobs
-# after the first stage use `!cancelled() && !failure()` so they still run when
-# clippy and test are skipped because no Rust-related file changed.
+# Windows and macOS builds; then the integration tests and Docker images.
 jobs:
   fmt:
     name: format
@@ -77,42 +75,8 @@ jobs:
       - name: Lint GitHub Actions workflows
         run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command actionlint -color
 
-  changes:
-    name: detect Rust changes
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      rust: ${{ steps.filter.outputs.rust }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      # Pull requests compare against their base and pushes against the previous
-      # tip; scheduled and manual runs, or an unknown base, always run the checks.
-      - id: filter
-        env:
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
-        run: |
-          case "$EVENT" in
-            pull_request) base=HEAD^1 ;;
-            push) base=$BEFORE ;;
-            *) base= ;;
-          esac
-          if [ -z "$base" ] || ! git rev-parse --verify --quiet "$base^{commit}" > /dev/null; then
-            rust=true
-          elif git diff --quiet "$base" HEAD -- '*.rs' Cargo.toml Cargo.lock flake.nix flake.lock rust-toolchain.toml; then
-            rust=false
-          else
-            rust=true
-          fi
-          echo "rust=$rust" >> "$GITHUB_OUTPUT"
-
   clippy:
     name: cargo clippy
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -149,8 +113,6 @@ jobs:
 
   test:
     name: cargo test
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -188,7 +150,6 @@ jobs:
   windows-build:
     name: cargo build --all-targets (${{ matrix.runner }})
     needs: [fmt, actionlint, clippy, test]
-    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -209,7 +170,6 @@ jobs:
   macos-build:
     name: nix package (aarch64-darwin)
     needs: [fmt, actionlint, clippy, test]
-    if: ${{ !cancelled() && !failure() }}
     runs-on: macos-26
     timeout-minutes: 45
     permissions:
@@ -269,7 +229,6 @@ jobs:
   package:
     name: nix package (${{ matrix.system }})
     needs: [fmt, actionlint, clippy, test]
-    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -306,7 +265,6 @@ jobs:
   static:
     name: nix static package (${{ matrix.system }})
     needs: [fmt, actionlint, clippy, test]
-    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -343,7 +301,6 @@ jobs:
   integration:
     name: ${{ matrix.check }} test (${{ matrix.system }})
     needs: [package, static]
-    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -385,7 +342,6 @@ jobs:
   docker-image:
     name: docker image (${{ matrix.system }})
     needs: static
-    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -413,7 +369,6 @@ jobs:
   image-scan:
     name: scan docker image (${{ matrix.system }})
     needs: docker-image
-    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
