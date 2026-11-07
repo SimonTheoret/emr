@@ -31,20 +31,26 @@
           version = "0.1.0";
           overlays = [ (import rust-overlay) ];
           pkgs = import nixpkgs { inherit system overlays; };
-          rustToolchain = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml)).toolchain;
-          rust = pkgs.rust-bin.fromRustupToolchain (
-            rustToolchain
+          rustToolchain =
+            let
+              toolchain = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml)).toolchain;
+            in
+            toolchain
             // {
               targets =
-                rustToolchain.targets or [ ]
+                toolchain.targets or [ ]
                 ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.pkgsStatic.stdenv.hostPlatform.rust.rustcTarget;
-            }
-          );
+            };
+          rust = pkgs.rust-bin.fromRustupToolchain rustToolchain;
+          staticRust = pkgs.pkgsStatic.buildPackages.rust-bin.fromRustupToolchain rustToolchain;
           rustPlatform = pkgs.makeRustPlatform {
             cargo = rust;
             rustc = rust;
           };
-          staticRustPlatform = pkgs.pkgsStatic.rustPlatform;
+          staticRustPlatform = pkgs.pkgsStatic.makeRustPlatform {
+            cargo = staticRust;
+            rustc = staticRust;
+          };
           meta = {
             description = "Record and replay proxy";
             license = pkgs.lib.licenses.mit;
