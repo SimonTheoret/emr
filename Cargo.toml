@@ -26,5 +26,6 @@ url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.26.0", features = ["serde", "v7"] }
 
 [dev-dependencies]
+insta = "1.49.0"
 proptest = "1.9.0"
 tempfile = "3.23.0"
