@@ -108,6 +108,7 @@
               just
               shfmt
               actionlint
+              cargo-outdated
             ]);
           };
 
