@@ -27,9 +27,8 @@ replay/matching exists as a library function but is not called from the request 
   includes `cargo-nextest`, `cargo-insta`, `cargo-expand`, and `gdb`.
 - `nix build` builds the statically linked release binary; `nix build .#dockerImage` builds the
   container image.
-- `.github/workflows/ci.yml` runs formatting, actionlint, compilation, Nix packaging, and the
-  Nix-built Docker image for pull requests and pushes to `main`; `.github/workflows/rust.yml` runs
-  Clippy and the tests, only when Rust sources, Cargo, flake or toolchain files change.
+- `.github/workflows/ci.yml` runs formatting, Clippy, tests, compilation, Nix packaging, and the
+  Nix-built Docker image for pull requests and pushes to `main`.
 
 ## Architecture
 

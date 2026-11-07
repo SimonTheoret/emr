@@ -16,9 +16,10 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
-# Stages: fmt and actionlint first; then the Nix packages and the Windows and
-# macOS builds; then the integration tests and Docker images. clippy and test
-# live in rust.yml, which only runs when Rust-related files change.
+# Stages: fmt, actionlint, clippy and test first; then the Nix packages and the
+# Windows and macOS builds; then the integration tests and Docker images. Jobs
+# after the first stage use `!cancelled() && !failure()` so they still run when
+# clippy and test are skipped because no Rust-related file changed.
 jobs:
   fmt:
     name: format
@@ -32,7 +33,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      # Same dev shell as clippy and test in rust.yml, so they share one Nix store cache.
+      # fmt, clippy and test use the same dev shell, so they share one Nix store cache.
       - name: Restore and save Nix store
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
@@ -60,9 +61,118 @@ jobs:
       - name: Lint GitHub Actions workflows
         run: nix develop --command actionlint -color
 
+  changes:
+    name: detect Rust changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # Pull requests compare against their base and pushes against the previous
+      # tip; scheduled and manual runs, or an unknown base, always run the checks.
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          case "$EVENT" in
+            pull_request) base=HEAD^1 ;;
+            push) base=$BEFORE ;;
+            *) base= ;;
+          esac
+          if [ -z "$base" ] || ! git rev-parse --verify --quiet "$base^{commit}" > /dev/null; then
+            rust=true
+          elif git diff --quiet "$base" HEAD -- '*.rs' Cargo.toml Cargo.lock flake.nix flake.lock rust-toolchain.toml; then
+            rust=false
+          else
+            rust=true
+          fi
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+
+  clippy:
+    name: cargo clippy
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write # purge old Nix store caches
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      # fmt, clippy and test use the same dev shell, so they share one Nix store cache.
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-devshell-${{ hashFiles('**/*.nix', '**/flake.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-devshell-
+          gc-max-store-size-linux: 1G
+          purge: true
+          purge-prefixes: nix-devshell-
+          purge-created: 3600
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
+      - name: Restore and save Cargo build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ github.job }}-${{ hashFiles('Cargo.lock', 'flake.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ github.job }}-
+      # The profile roots the dev shell, so it survives the cache's garbage collection.
+      - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo clippy --all-targets --all-features
+
+  test:
+    name: cargo test
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write # purge old Nix store caches
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      # fmt, clippy and test use the same dev shell, so they share one Nix store cache.
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-devshell-${{ hashFiles('**/*.nix', '**/flake.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-devshell-
+          gc-max-store-size-linux: 1G
+          purge: true
+          purge-prefixes: nix-devshell-
+          purge-created: 3600
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
+      - name: Restore and save Cargo build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ github.job }}-${{ hashFiles('Cargo.lock', 'flake.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ github.job }}-
+      # The profile roots the dev shell, so it survives the cache's garbage collection.
+      - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo test
+
   windows-build:
     name: cargo build --all-targets (${{ matrix.runner }})
-    needs: [fmt, actionlint]
+    needs: [fmt, actionlint, clippy, test]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -82,7 +192,8 @@ jobs:
 
   macos-build:
     name: nix package (aarch64-darwin)
-    needs: [fmt, actionlint]
+    needs: [fmt, actionlint, clippy, test]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: macos-26
     timeout-minutes: 45
     steps:
@@ -113,7 +224,8 @@ jobs:
 
   package:
     name: nix package (${{ matrix.system }})
-    needs: [fmt, actionlint]
+    needs: [fmt, actionlint, clippy, test]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -149,7 +261,8 @@ jobs:
 
   static:
     name: nix static package (${{ matrix.system }})
-    needs: [fmt, actionlint]
+    needs: [fmt, actionlint, clippy, test]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -186,6 +299,7 @@ jobs:
   integration:
     name: ${{ matrix.check }} test (${{ matrix.system }})
     needs: [package, static]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -227,6 +341,7 @@ jobs:
   docker-image:
     name: docker image (${{ matrix.system }})
     needs: static
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -254,6 +369,7 @@ jobs:
   image-scan:
     name: scan docker image (${{ matrix.system }})
     needs: docker-image
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
