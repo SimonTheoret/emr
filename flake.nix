@@ -31,7 +31,15 @@
           version = "0.1.0";
           overlays = [ (import rust-overlay) ];
           pkgs = import nixpkgs { inherit system overlays; };
-          rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          rustToolchain = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml)).toolchain;
+          rust = pkgs.rust-bin.fromRustupToolchain (
+            rustToolchain
+            // {
+              targets =
+                rustToolchain.targets or [ ]
+                ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.pkgsStatic.stdenv.hostPlatform.rust.rustcTarget;
+            }
+          );
           rustPlatform = pkgs.makeRustPlatform {
             cargo = rust;
             rustc = rust;
