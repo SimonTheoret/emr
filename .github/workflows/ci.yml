@@ -115,7 +115,7 @@ jobs:
       - name: Restore and save Nix store
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
-          primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock') }}
+          primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock', 'rust-toolchain.toml') }}
           restore-prefixes-first-match: nix-${{ github.job }}-${{ matrix.system }}-
           gc-max-store-size-linux: 1G
           gc-max-store-size-macos: 1G
@@ -124,7 +124,9 @@ jobs:
           purge-created: 3600
           purge-last-accessed: P1DT12H
           purge-primary-key: never
-      - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.default
+      # The out-link roots the package, so it survives the cache's garbage collection
+      # and the integration test restores it instead of rebuilding.
+      - run: nix build --out-link result --print-build-logs .#packages.${{ matrix.system }}.default
 
   static:
     name: nix static package (${{ matrix.system }})
@@ -152,7 +154,7 @@ jobs:
       - name: Restore and save Nix store
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
-          primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock') }}
+          primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock', 'rust-toolchain.toml') }}
           restore-prefixes-first-match: nix-${{ github.job }}-${{ matrix.system }}-
           gc-max-store-size-linux: 1G
           gc-max-store-size-macos: 1G
@@ -161,7 +163,9 @@ jobs:
           purge-created: 3600
           purge-last-accessed: P1DT12H
           purge-primary-key: never
-      - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.static
+      # The out-link roots the package, so it survives the cache's garbage collection
+      # and the integration test restores it instead of rebuilding.
+      - run: nix build --out-link result --print-build-logs .#packages.${{ matrix.system }}.static
 
   integration:
     name: ${{ matrix.check }} test (${{ matrix.system }})
@@ -181,20 +185,24 @@ jobs:
             runner: ubuntu-26.04
           - system: aarch64-linux
             runner: ubuntu-26.04-arm
+          # Share the Nix store cache of the job that built the package under test.
+          - check: integration
+            cache: package
+          - check: integration-static
+            cache: static
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      # Both checks of a system share one cache; whichever leg finishes first saves it.
       - name: Restore and save Nix store
         uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
-          primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock') }}
-          restore-prefixes-first-match: nix-${{ github.job }}-${{ matrix.system }}-
+          primary-key: nix-${{ matrix.cache }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-${{ matrix.cache }}-${{ matrix.system }}-
           gc-max-store-size-linux: 1G
           purge: true
-          purge-prefixes: nix-${{ github.job }}-${{ matrix.system }}-
+          purge-prefixes: nix-${{ matrix.cache }}-${{ matrix.system }}-
           purge-created: 3600
           purge-last-accessed: P1DT12H
           purge-primary-key: never
