@@ -1,0 +1,105 @@
+name: Rust
+
+# Only runs when something that affects compiling or linting the Rust code changes.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "**.rs"
+      - Cargo.toml
+      - Cargo.lock
+      - flake.nix
+      - flake.lock
+      - rust-toolchain.toml
+      - .github/workflows/rust.yml
+  push:
+    branches: [main]
+    paths:
+      - "**.rs"
+      - Cargo.toml
+      - Cargo.lock
+      - flake.nix
+      - flake.lock
+      - rust-toolchain.toml
+      - .github/workflows/rust.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  clippy:
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write # purge old Nix store caches
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      # clippy and test use the same dev shell, so they share one Nix store cache.
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-devshell-${{ hashFiles('**/*.nix', '**/flake.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-devshell-
+          gc-max-store-size-linux: 1G
+          purge: true
+          purge-prefixes: nix-devshell-
+          purge-created: 3600
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
+      - name: Restore and save Cargo build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ github.job }}-${{ hashFiles('Cargo.lock', 'flake.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ github.job }}-
+      # The profile roots the dev shell, so it survives the cache's garbage collection.
+      - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo clippy --all-targets --all-features
+
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write # purge old Nix store caches
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      # clippy and test use the same dev shell, so they share one Nix store cache.
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-devshell-${{ hashFiles('**/*.nix', '**/flake.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-devshell-
+          gc-max-store-size-linux: 1G
+          purge: true
+          purge-prefixes: nix-devshell-
+          purge-created: 3600
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
+      - name: Restore and save Cargo build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ github.job }}-${{ hashFiles('Cargo.lock', 'flake.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ github.job }}-
+      # The profile roots the dev shell, so it survives the cache's garbage collection.
+      - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo test
