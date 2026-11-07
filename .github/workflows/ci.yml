@@ -163,6 +163,15 @@ jobs:
           persist-credentials: false
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup toolchain install
+      - name: Restore and save Cargo build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ github.job }}-${{ matrix.runner }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ github.job }}-${{ matrix.runner }}-
       - name: Build on Windows
         if: runner.os == 'Windows'
         run: cargo build --all-targets
