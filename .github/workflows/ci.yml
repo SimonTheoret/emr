@@ -5,48 +5,101 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  schedule:
+    - cron: "0 12 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
 
 jobs:
   fmt:
     name: format
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
     steps:
-      - uses: actions/checkout@v7.0.1
+      - &checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
+      - &install-nix
+        uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      - &devshell-cache
+        name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-devshell-${{ hashFiles('**/*.nix', '**/flake.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-devshell-
+          gc-max-store-size-linux: 1G
+          purge: true
+          purge-prefixes: nix-devshell-
+          purge-created: 3600
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
       - name: Verify Rust, Nix, and shell formatting
-        run: nix develop --command just format-check
+        run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command just format-check
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - *checkout
+      - *install-nix
+      - *devshell-cache
+      - name: Lint GitHub Actions workflows
+        run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command actionlint -color
 
   clippy:
     name: cargo clippy
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write
     steps:
-      - uses: actions/checkout@v7.0.1
+      - *checkout
+      - *install-nix
+      - *devshell-cache
+      - &cargo-cache
+        name: Restore and save Cargo build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
-      - run: nix develop --command cargo clippy --all-targets --all-features
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'flake.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
+      - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo clippy --all-targets --all-features
 
   test:
     name: cargo test
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write
     steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
-      - run: nix develop --command cargo test
+      - *checkout
+      - *install-nix
+      - *devshell-cache
+      - *cargo-cache
+      - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo test
 
   windows-build:
     name: cargo build --all-targets (${{ matrix.runner }})
+    needs: [fmt, actionlint, clippy, test]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -55,16 +108,122 @@ jobs:
         runner:
           - windows-latest
     steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - *checkout
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - *cargo-cache
       - name: Build on Windows
         if: runner.os == 'Windows'
         run: cargo build --all-targets
 
-  nix-build:
-    name: build every flake output (${{ matrix.system }})
+  macos-build:
+    name: nix package (aarch64-darwin)
+    needs: [fmt, actionlint, clippy, test]
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - *checkout
+      - *install-nix
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ github.job }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-${{ github.job }}-
+          gc-max-store-size-macos: 1G
+          purge: true
+          purge-prefixes: nix-${{ github.job }}-
+          purge-created: 3600
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
+      - run: nix build --out-link result --print-build-logs .#packages.aarch64-darwin.default
+
+  cargo-dependencies:
+    name: Cargo dependencies are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - *checkout
+      - *install-nix
+      - *devshell-cache
+      - name: Check direct dependency versions
+        run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo outdated --root-deps-only --exit-code 1
+      - name: Show warning
+        if: failure()
+        run: echo "::warning title=Cargo dependencies check failed::Cargo dependencies are outdated or the check could not run; see the job log."
+
+  package:
+    name: nix ${{ matrix.package }} package (${{ matrix.system }})
+    needs: [fmt, actionlint, clippy, test]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [x86_64-linux, aarch64-linux]
+        package: [default, static]
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-26.04
+          - system: aarch64-linux
+            runner: ubuntu-26.04-arm
+    steps:
+      - *checkout
+      - *install-nix
+      - &package-cache
+        name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ matrix.package }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-${{ matrix.package }}-${{ matrix.system }}-
+          gc-max-store-size-linux: 1G
+          purge: true
+          purge-prefixes: nix-${{ matrix.package }}-${{ matrix.system }}-
+          purge-created: 3600
+          purge-last-accessed: P1DT12H
+          purge-primary-key: never
+      - run: nix build --out-link result --print-build-logs .#packages.${{ matrix.system }}.${{ matrix.package }}
+
+  integration:
+    name: ${{ matrix.check }} test (${{ matrix.system }})
+    needs: package
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [x86_64-linux, aarch64-linux]
+        check: [integration, integration-static]
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-26.04
+          - system: aarch64-linux
+            runner: ubuntu-26.04-arm
+          - check: integration
+            package: default
+          - check: integration-static
+            package: static
+    steps:
+      - *checkout
+      - *install-nix
+      - *package-cache
+      - run: nix build --no-link --print-build-logs .#checks.${{ matrix.system }}.${{ matrix.check }}
+
+  docker-image:
+    name: docker image (${{ matrix.system }})
+    needs: package
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -73,26 +232,59 @@ jobs:
         include:
           - system: x86_64-linux
             runner: ubuntu-26.04
-            integration: true
           - system: aarch64-linux
             runner: ubuntu-26.04-arm
-            integration: true
-          - system: aarch64-darwin
-            runner: macos-26
-            integration: false
     steps:
-      - uses: actions/checkout@v7.0.1
+      - *checkout
+      - *install-nix
+      - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.dockerImage
+      - name: Export image for scanning
+        run: cp "$(nix build --no-link --print-out-paths .#packages.${{ matrix.system }}.dockerImage)" erm-image.tar.gz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@v31.11.3
-      - name: Build outputs
+          name: erm-image-${{ matrix.system }}
+          path: erm-image.tar.gz
+          retention-days: 1
+
+  image-scan:
+    name: scan docker image (${{ matrix.system }})
+    needs: docker-image
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-26.04
+          - system: aarch64-linux
+            runner: ubuntu-26.04-arm
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: erm-image-${{ matrix.system }}
+      - name: Load image
+        run: docker load --input erm-image.tar.gz
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: erm:0.1.0
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+
+  nix-dependencies:
+    name: Nix dependencies are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - *checkout
+      - *install-nix
+      - name: Check flake.lock
         run: |
-          nix build --no-link --print-build-logs \
-            .#packages.${{ matrix.system }}.default \
-            .#packages.${{ matrix.system }}.static \
-            .#packages.${{ matrix.system }}.dockerImage \
-            .#devShells.${{ matrix.system }}.default \
-            .#formatter.${{ matrix.system }}
-      - name: Build integration test
-        if: matrix.integration
-        run: nix build --no-link --print-build-logs .#checks.${{ matrix.system }}.integration
+          nix flake update
+          git diff --exit-code -- flake.lock
+      - name: Show warning
+        if: failure()
+        run: echo "::warning title=Nix dependencies check failed::Nix flake inputs are outdated or the check could not run; see the job log."
