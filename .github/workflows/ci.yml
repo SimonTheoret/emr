@@ -15,8 +15,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
-  # Keep in sync with rustVersion in flake.nix.
-  RUST_VERSION: "1.99.1"
+  # Must match rustVersion in flake.nix; the flake's rust-version check enforces it.
+  RUST_VERSION: "1.99.0"
 
 jobs:
   fmt:
@@ -128,6 +128,8 @@ jobs:
           purge-created: 3600
           purge-last-accessed: P1DT12H
           purge-primary-key: never
+      - name: Check Rust version matches nixpkgs and CI
+        run: nix build --no-link --print-build-logs .#checks.${{ matrix.system }}.rust-version
       - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.default
 
   static:

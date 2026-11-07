@@ -28,8 +28,9 @@
           version = "0.1.0";
           overlays = [ (import rust-overlay) ];
           pkgs = import nixpkgs { inherit system overlays; };
-          # Keep in sync with RUST_VERSION in .github/workflows/ci.yml.
-          rustVersion = "1.99.1";
+          # Must match nixpkgs' rustc (used to build the packages) and RUST_VERSION in
+          # .github/workflows/ci.yml; the rust-version check enforces both.
+          rustVersion = "1.99.0";
           rust = pkgs.rust-bin.stable.${rustVersion}.default.override {
             extensions = [
               "rust-src"
@@ -111,7 +112,20 @@
 
           formatter = pkgs.nixfmt;
 
-          checks = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          checks = {
+            rust-version = pkgs.runCommand "rust-version" { } ''
+              if [ "${pkgs.rustc.version}" != "${rustVersion}" ]; then
+                echo "nixpkgs ships rustc ${pkgs.rustc.version}, but rustVersion is ${rustVersion}; update rustVersion in flake.nix" >&2
+                exit 1
+              fi
+              if ! grep -qF 'RUST_VERSION: "${rustVersion}"' ${./.github/workflows/ci.yml}; then
+                echo "RUST_VERSION in .github/workflows/ci.yml does not match rustVersion ${rustVersion}" >&2
+                exit 1
+              fi
+              touch $out
+            '';
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             integration = integrationTest;
             integration-static = integrationTestStatic;
           };
