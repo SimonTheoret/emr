@@ -144,8 +144,6 @@ jobs:
             runner: ubuntu-26.04
           - system: aarch64-linux
             runner: ubuntu-26.04-arm
-          - system: aarch64-darwin
-            runner: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -157,7 +155,6 @@ jobs:
           primary-key: nix-${{ github.job }}-${{ matrix.system }}-${{ hashFiles('**/*.nix', '**/flake.lock', 'Cargo.lock', 'rust-toolchain.toml') }}
           restore-prefixes-first-match: nix-${{ github.job }}-${{ matrix.system }}-
           gc-max-store-size-linux: 1G
-          gc-max-store-size-macos: 1G
           purge: true
           purge-prefixes: nix-${{ github.job }}-${{ matrix.system }}-
           purge-created: 3600

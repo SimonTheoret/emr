@@ -75,21 +75,26 @@
           };
         in
         {
-          packages.default = ermPackage;
-          packages.static = ermPackageStatic;
+          packages = {
+            default = ermPackage;
+          }
+          # Static builds only exist to go into Linux Docker images.
+          // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            static = ermPackageStatic;
 
-          packages.dockerImage = pkgs.pkgsStatic.dockerTools.buildLayeredImage {
-            name = "${name}";
-            tag = "${version}";
-            contents = [
-              pkgs.dockerTools.caCertificates
-              ermPackageStatic
-            ];
-
-            config = {
-              Cmd = [
-                (pkgs.lib.getExe ermPackageStatic)
+            dockerImage = pkgs.pkgsStatic.dockerTools.buildLayeredImage {
+              name = "${name}";
+              tag = "${version}";
+              contents = [
+                pkgs.dockerTools.caCertificates
+                ermPackageStatic
               ];
+
+              config = {
+                Cmd = [
+                  (pkgs.lib.getExe ermPackageStatic)
+                ];
+              };
             };
           };
 
