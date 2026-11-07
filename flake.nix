@@ -3,7 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -28,12 +31,13 @@
           version = "0.1.0";
           overlays = [ (import rust-overlay) ];
           pkgs = import nixpkgs { inherit system overlays; };
-          rust = pkgs.rust-bin.stable.latest.default.override {
-            extensions = [
-              "rust-src"
-              "rust-analyzer"
-            ];
-            targets = [ ];
+          # The toolchain pinned in rust-toolchain.toml, used by the dev shell and to
+          # build the default package. The static package uses nixpkgs' static
+          # Rust platform.
+          rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rust;
+            rustc = rust;
           };
           meta = {
             description = "Record and replay proxy";
@@ -41,7 +45,7 @@
             mainProgram = name;
             maintainers = [ "simon.theoret99@gmail.com" ];
           };
-          ermPackage = pkgs.rustPlatform.buildRustPackage (finalAttrs: {
+          ermPackage = rustPlatform.buildRustPackage (finalAttrs: {
             pname = name;
             inherit version;
             src = ./.;
@@ -64,6 +68,10 @@
           integrationTest = import ./tests/integration {
             inherit pkgs;
             erm = ermPackage;
+          };
+          integrationTestStatic = import ./tests/integration {
+            inherit pkgs;
+            erm = ermPackageStatic;
           };
         in
         {
@@ -91,7 +99,6 @@
             ]
             ++ (with pkgs; [
               pkg-config
-              clippy
               cargo-expand
               cargo-nextest
               cargo-insta
@@ -107,6 +114,7 @@
 
           checks = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             integration = integrationTest;
+            integration-static = integrationTestStatic;
           };
 
           apps = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
