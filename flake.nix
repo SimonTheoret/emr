@@ -107,6 +107,7 @@
               gdb
               just
               shfmt
+              actionlint
             ]);
           };
 
