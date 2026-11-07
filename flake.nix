@@ -109,7 +109,12 @@
               shfmt
               actionlint
               cargo-outdated
+              sccache
             ]);
+
+            # Cache compiled crates in ~/.cache/sccache, shared across checkouts and
+            # worktrees.
+            RUSTC_WRAPPER = "sccache";
           };
 
           formatter = pkgs.nixfmt;

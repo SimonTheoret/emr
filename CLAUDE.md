@@ -24,7 +24,9 @@ replay/matching exists as a library function but is not called from the request 
 - `cargo run -- -d <destination-url>` — start the proxy. `-d/--destination` is required;
   `-m/--mock-dir` defaults to `mocks` (created if missing) and `-p` (port) defaults to `4321`.
 - `nix develop` (or `direnv allow`, since `.envrc` is `use flake`) for the dev shell, which
-  includes `cargo-nextest`, `cargo-insta`, `cargo-expand`, and `gdb`.
+  includes `cargo-nextest`, `cargo-insta`, `cargo-expand`, and `gdb`. It sets
+  `RUSTC_WRAPPER=sccache`, so compiled crates are cached in `~/.cache/sccache` across checkouts and
+  worktrees (`sccache --show-stats` shows hits).
 - `nix build` builds the statically linked release binary; `nix build .#dockerImage` builds the
   container image.
 - `.github/workflows/ci.yml` runs formatting, Clippy, tests, compilation, Nix packaging, and the
