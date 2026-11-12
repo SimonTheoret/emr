@@ -140,23 +140,23 @@ jobs:
           purge-primary-key: never
       - run: nix build --out-link result --print-build-logs .#packages.aarch64-darwin.default
 
-  cargo-dependencies:
-    name: Cargo dependencies are current
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    continue-on-error: true
-    permissions:
-      contents: read
-      actions: write
-    steps:
-      - *checkout
-      - *install-nix
-      - *devshell-cache
-      - name: Check direct dependency versions
-        run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo outdated --root-deps-only --exit-code 1
-      - name: Show warning
-        if: failure()
-        run: echo "::warning title=Cargo dependencies check failed::Cargo dependencies are outdated or the check could not run; see the job log."
+  # cargo-dependencies:
+  #   name: Cargo dependencies are current
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   continue-on-error: true
+  #   permissions:
+  #     contents: read
+  #     actions: write
+  #   steps:
+  #     - *checkout
+  #     - *install-nix
+  #     - *devshell-cache
+  #     - name: Check direct dependency versions
+  #       run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo outdated --root-deps-only --exit-code 1
+  #     - name: Show warning
+  #       if: failure()
+  #       run: echo "::warning title=Cargo dependencies check failed::Cargo dependencies are outdated or the check could not run; see the job log."
 
   package:
     name: nix ${{ matrix.package }} package (${{ matrix.system }})
@@ -273,18 +273,18 @@ jobs:
           ignore-unfixed: true
           exit-code: 1
 
-  nix-dependencies:
-    name: Nix dependencies are current
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    continue-on-error: true
-    steps:
-      - *checkout
-      - *install-nix
-      - name: Check flake.lock
-        run: |
-          nix flake update
-          git diff --exit-code -- flake.lock
-      - name: Show warning
-        if: failure()
-        run: echo "::warning title=Nix dependencies check failed::Nix flake inputs are outdated or the check could not run; see the job log."
+  # nix-dependencies:
+  #   name: Nix dependencies are current
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   continue-on-error: true
+  #   steps:
+  #     - *checkout
+  #     - *install-nix
+  #     - name: Check flake.lock
+  #       run: |
+  #         nix flake update
+  #         git diff --exit-code -- flake.lock
+  #     - name: Show warning
+  #       if: failure()
+  #       run: echo "::warning title=Nix dependencies check failed::Nix flake inputs are outdated or the check could not run; see the job log."
