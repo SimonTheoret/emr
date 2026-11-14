@@ -1,2 +1,6 @@
 /target
 /.direnv
+**/*.drawio.bkp
+.claude/worktrees
+.claude/.cc-writes
+**/__pycache__

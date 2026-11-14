@@ -1,3 +1,17 @@
 {
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:docs.github.com)",
+      "WebFetch(domain:github.blog)",
+      "Bash(nix develop *)",
+      "Bash(echo \"actionlint exit=$?\")",
+      "Bash(echo \"format-check exit=$?\")",
+      "Bash(nix flake *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(grep -vE '^\\\\?\\\\? \\\\.zprofile$')"
+    ]
+  },
   "outputStyle": "Concise"
 }

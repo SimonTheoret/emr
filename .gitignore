@@ -6,4 +6,5 @@
 **/*.drawio.dtmp
 /result
 **/__pycache__
-/.claude/worktrees
+.claude/worktrees
+.claude/.cc-writes
