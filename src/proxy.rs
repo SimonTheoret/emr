@@ -1,5 +1,6 @@
 use axum::{body::Body, response::Response};
-use http::{HeaderMap, HeaderName, StatusCode};
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use url::{Position, Url};
 
 use crate::ir::{UriIR, UrlIR};
 
@@ -23,6 +24,29 @@ pub(crate) fn upstream_url(destination: &UrlIR, uri: &UriIR) -> UrlIR {
     upstream.set_path(&path);
     upstream.set_query(uri.query());
     upstream
+}
+
+/// The `Location` ERM sends its client for a redirect: the path that `upstream_url` forwards to
+/// the URL `location` names. `None` if that URL is outside `destination`.
+pub(crate) fn client_location(
+    destination: &Url,
+    requested: &Url,
+    location: &HeaderValue,
+) -> Option<HeaderValue> {
+    let target = requested
+        .join(std::str::from_utf8(location.as_bytes()).ok()?)
+        .ok()?;
+    if target.origin() != destination.origin() {
+        return None;
+    }
+    let rest = target
+        .path()
+        .strip_prefix(destination.path().trim_end_matches('/'))?;
+    if !(rest.is_empty() || rest.starts_with('/')) {
+        return None;
+    }
+    let path = if rest.is_empty() { "/" } else { rest };
+    HeaderValue::try_from(format!("{path}{}", &target[Position::AfterPath..])).ok()
 }
 
 /// Remove headers that apply only to one transport hop.
@@ -103,6 +127,67 @@ mod tests {
             upstream_url(&prefixed, &"/".parse().unwrap()).as_str(),
             "http://example.test/api/"
         );
+    }
+
+    fn client_location_of(location: &str) -> Option<String> {
+        let destination = "http://up.test/api".parse().unwrap();
+        let requested = "http://up.test/api/auth/start?step=1".parse().unwrap();
+        client_location(
+            &destination,
+            &requested,
+            &HeaderValue::from_str(location).unwrap(),
+        )
+        .map(|value| value.to_str().unwrap().to_owned())
+    }
+
+    #[test]
+    fn a_location_inside_the_destination_becomes_a_path_erm_forwards_to_it() {
+        let destination: UrlIR = "http://up.test/api".parse().unwrap();
+        let requested: Url = "http://up.test/api/auth/start?step=1".parse().unwrap();
+        for (location, rewritten) in [
+            ("http://up.test/api/v2/login?next=%2F", "/v2/login?next=%2F"),
+            ("HTTP://UP.test:80/api/v2/login", "/v2/login"),
+            ("/api/v2/login", "/v2/login"),
+            ("login", "/auth/login"),
+            ("../login", "/login"),
+            ("?step=2", "/auth/start?step=2"),
+        ] {
+            assert_eq!(
+                client_location_of(location).as_deref(),
+                Some(rewritten),
+                "{location}"
+            );
+            assert_eq!(
+                upstream_url(&destination, &rewritten.parse().unwrap()).as_str(),
+                requested.join(location).unwrap().as_str(),
+                "ERM forwards {rewritten} to the URL that {location} names"
+            );
+        }
+        assert_eq!(
+            client_location_of("/api/v2/login#form").as_deref(),
+            Some("/v2/login#form"),
+            "the fragment is kept"
+        );
+        assert_eq!(
+            client_location_of("/api").as_deref(),
+            Some("/"),
+            "the destination itself is the root path"
+        );
+    }
+
+    #[test]
+    fn a_location_outside_the_destination_has_no_client_location() {
+        for location in [
+            "https://up.test/api/v2/login",
+            "http://up.test:8080/api/v2/login",
+            "http://other.test/api/v2/login",
+            "//other.test/api/v2/login",
+            "/v2/login",
+            "/apix",
+            "http://[::1",
+        ] {
+            assert_eq!(client_location_of(location), None, "{location}");
+        }
     }
 
     #[test]

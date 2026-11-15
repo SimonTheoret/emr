@@ -6,8 +6,8 @@ use axum::{
     extract::{Request, State},
     response::{IntoResponse, Response},
 };
-use http::{StatusCode, request};
-use reqwest::Client;
+use http::{StatusCode, header, request};
+use reqwest::{Client, redirect};
 
 use self::capture::{Saver, Tap};
 use crate::{cli::RecordArgs, ir::UrlIR, match_id::MatchId, proxy, server, storage};
@@ -32,9 +32,14 @@ pub async fn run(args: RecordArgs) -> eyre::Result<()> {
     Ok(served?)
 }
 
-/// The client that forwards each request to the upstream.
+/// Sends each request once. The client follows redirects itself, through ERM, so each hop is
+/// recorded.
 fn client() -> reqwest::Result<Client> {
-    Client::builder().use_rustls_tls().user_agent("erm").build()
+    Client::builder()
+        .use_rustls_tls()
+        .user_agent("erm")
+        .redirect(redirect::Policy::none())
+        .build()
 }
 
 /// Everything record mode's handler can reach. Replay mode never builds one, so no
@@ -53,7 +58,13 @@ async fn record(
 ) -> Result<Response, BadGateway> {
     let (parts, body) = request.into_parts();
     let (capture, body) = state.saver.capture(id, &parts, body);
-    let upstream = state.forward(parts, body).await.map_err(BadGateway)?;
+    let mut upstream = state
+        .forward(parts, body)
+        .await
+        .map_err(BadGateway::Unreachable)?;
+    if upstream.status().is_redirection() {
+        state.redirect_through_erm(&mut upstream)?;
+    }
     let (head, body) = capture.respond(upstream).into_parts();
     Ok(proxy::client_response(
         head.status,
@@ -84,14 +95,53 @@ impl Recording {
             .send()
             .await
     }
+
+    /// Points every `Location` of a redirect at ERM, so the client follows it through ERM.
+    fn redirect_through_erm(&self, upstream: &mut reqwest::Response) -> Result<(), BadGateway> {
+        let requested = upstream.url().clone();
+        let headers = upstream.headers_mut();
+        let locations = headers
+            .get_all(header::LOCATION)
+            .iter()
+            .map(|location| {
+                proxy::client_location(&self.destination, &requested, location).ok_or_else(|| {
+                    BadGateway::Outside {
+                        location: String::from_utf8_lossy(location.as_bytes()).into_owned(),
+                        destination: self.destination.to_string(),
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        headers.remove(header::LOCATION);
+        for location in locations {
+            headers.append(header::LOCATION, location);
+        }
+        Ok(())
+    }
 }
 
-/// The upstream request failed before a response head arrived. Nothing is saved.
-struct BadGateway(reqwest::Error);
+/// The upstream gave no response that the client can use through ERM. Nothing is saved.
+enum BadGateway {
+    /// The request failed before a response head arrived.
+    Unreachable(reqwest::Error),
+    /// A redirect to `location`, which the client could not follow through ERM.
+    Outside {
+        location: String,
+        destination: String,
+    },
+}
 
 impl IntoResponse for BadGateway {
     fn into_response(self) -> Response {
-        let message = format!("could not reach the upstream: {}", self.0);
+        let message = match self {
+            Self::Unreachable(error) => format!("could not reach the upstream: {error}"),
+            Self::Outside {
+                location,
+                destination,
+            } => format!(
+                "the upstream redirected to `{location}`, which is outside the destination {destination}"
+            ),
+        };
         (StatusCode::BAD_GATEWAY, message).into_response()
     }
 }
@@ -111,12 +161,11 @@ mod tests {
 
     use axum::{
         response::AppendHeaders,
-        routing::{any, get},
+        routing::{any, get, post},
     };
     use bytes::Bytes;
     use futures::{StreamExt, stream};
-    use http::{Method, header};
-    use reqwest::redirect;
+    use http::{HeaderMap, Method};
     use tokio::{
         net::TcpListener,
         sync::oneshot,
@@ -202,9 +251,32 @@ mod tests {
                 .route("/frames", any(frames))
                 .route("/fails", get(fails))
                 .route("/hangs", get(hangs))
-                .route("/no-content", get(|| async { StatusCode::NO_CONTENT })),
+                .route("/no-content", get(|| async { StatusCode::NO_CONTENT }))
+                .route(
+                    "/redirect",
+                    post(|| async { (StatusCode::SEE_OTHER, [(header::LOCATION, "/frames")]) }),
+                )
+                .route("/to-frames", get(to_frames))
+                .route(
+                    "/elsewhere",
+                    get(|| async {
+                        (
+                            StatusCode::FOUND,
+                            [(header::LOCATION, "https://elsewhere.test/frames")],
+                        )
+                    }),
+                ),
         )
         .await
+    }
+
+    /// Redirects to `/frames` with an absolute URL on the upstream itself.
+    async fn to_frames(headers: HeaderMap) -> impl IntoResponse {
+        let host = headers[header::HOST].to_str().unwrap();
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, format!("http://{host}/frames"))],
+        )
     }
 
     /// Reads the whole request, then answers with two `set-cookie` headers and `FRAMES`, each
@@ -364,6 +436,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_redirect_inside_the_destination_points_at_erm_and_is_saved_that_way() {
+        let upstream = upstream().await;
+        let (recorder, receiver) = saves();
+        let proxy = Proxy::start(&upstream.url, recorder).await;
+
+        let absolute = send(Method::GET, proxy.url("/to-frames"), "absolute").await;
+        let relative = send(Method::POST, proxy.url("/redirect"), "relative").await;
+        let seen = [
+            (
+                absolute.status(),
+                absolute.headers()[header::LOCATION].clone(),
+            ),
+            (
+                relative.status(),
+                relative.headers()[header::LOCATION].clone(),
+            ),
+        ];
+        absolute.bytes().await.unwrap();
+        relative.bytes().await.unwrap();
+        proxy.stop().await;
+
+        assert_eq!(
+            seen,
+            [
+                (StatusCode::FOUND, "/frames".parse().unwrap()),
+                (StatusCode::SEE_OTHER, "/frames".parse().unwrap()),
+            ],
+            "the caller gets each redirect, pointing at ERM"
+        );
+        let mut exchanges = saved(receiver);
+        exchanges.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(ids(&exchanges), ["absolute", "relative"]);
+        for exchange in &exchanges {
+            let headers = HeaderMap::from(exchange.response.parts.headers.clone());
+            assert_eq!(
+                headers[header::LOCATION],
+                "/frames",
+                "{} is saved with the Location the caller saw",
+                exchange.id
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_follows_a_redirect_sends_each_hop_through_erm() {
+        let upstream = upstream().await;
+        let (recorder, receiver) = saves();
+        let proxy = Proxy::start(&upstream.url, recorder).await;
+
+        let response = Client::new()
+            .get(proxy.url("/to-frames"))
+            .header(MATCH, "chain")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.url().as_str(),
+            proxy.url("/frames"),
+            "the caller followed the redirect to ERM"
+        );
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.bytes().await.unwrap(), FRAMES.concat());
+        proxy.stop().await;
+
+        let mut hops: Vec<String> = saved(receiver)
+            .iter()
+            .map(|exchange| {
+                let status = StatusCode::from(exchange.response.parts.status);
+                format!("{} {}", status.as_u16(), *exchange.request.parts.uri)
+            })
+            .collect();
+        hops.sort();
+        assert_eq!(
+            hops,
+            ["200 /frames", "302 /to-frames"],
+            "both hops are saved"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_redirect_outside_the_destination_gets_502_and_saves_nothing() {
+        let upstream = upstream().await;
+        let (recorder, receiver) = saves();
+        let proxy = Proxy::start(&upstream.url, recorder).await;
+
+        let response = send(Method::GET, proxy.url("/elsewhere"), "elsewhere").await;
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let message = response.text().await.unwrap();
+        assert!(
+            message.contains("https://elsewhere.test/frames"),
+            "the message names the Location: {message}"
+        );
+        proxy.stop().await;
+
+        assert!(saved(receiver).is_empty(), "nothing is saved");
+    }
+
+    #[tokio::test]
     async fn a_missing_repeated_or_invalid_id_gets_400_and_is_not_forwarded_or_saved() {
         let hits = Arc::new(AtomicUsize::new(0));
         let counted = hits.clone();
@@ -432,7 +602,6 @@ mod tests {
     #[cfg(feature = "ron")]
     #[tokio::test]
     async fn q1_a_recorded_exchange_replays_as_the_caller_saw_it() {
-        use http::HeaderMap;
         use tempfile::TempDir;
 
         use crate::{
