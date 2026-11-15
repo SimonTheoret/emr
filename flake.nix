@@ -59,9 +59,6 @@
             cargoLock.lockFile = ./Cargo.lock;
             doInstallCheck = true;
             inherit installCheckPhase;
-            postInstall = ''
-              ${pkgs.binutils}/bin/strip --strip-unneeded "$out/bin/${name}"
-            '';
             inherit meta;
           };
           ermPackageStatic = staticRustPlatform.buildRustPackage {
@@ -71,9 +68,6 @@
             cargoLock.lockFile = ./Cargo.lock;
             doInstallCheck = true;
             inherit installCheckPhase;
-            postInstall = ''
-              ${pkgs.binutils}/bin/strip --strip-unneeded "$out/bin/${name}"
-            '';
             inherit meta;
           };
           integrationTest = import ./tests/integration {
