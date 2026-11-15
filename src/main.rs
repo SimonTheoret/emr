@@ -21,6 +21,7 @@ use tokio::{
 mod cli;
 mod ir;
 mod legacy_storage;
+mod match_id;
 pub mod matching;
 mod proxy;
 // The record mode starts using it later in this stack.

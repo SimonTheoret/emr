@@ -1,4 +1,5 @@
-use http::{HeaderMap, HeaderName};
+use axum::{body::Body, response::Response};
+use http::{HeaderMap, HeaderName, StatusCode};
 
 use crate::ir::{UriIR, UrlIR};
 
@@ -16,7 +17,6 @@ const HOP_BY_HOP_HEADERS: &[&str] = &[
 
 /// Prefix an incoming origin-form path with the destination's base path.
 pub(crate) fn upstream_url(destination: &UrlIR, uri: &UriIR) -> UrlIR {
-    dbg!(uri);
     let mut upstream: UrlIR = destination.clone();
     let mut path: String = destination.path().trim_end_matches('/').to_owned();
     path.push_str(uri.path());
@@ -53,6 +53,16 @@ pub(crate) fn sanitize_headers(headers: &mut HeaderMap) {
     headers.remove("content-length");
 }
 
+/// The response ERM sends its client, in both modes: a status, the headers after
+/// `sanitize_headers`, and a streamed body. The connection to the client picks the version.
+pub(crate) fn client_response(status: StatusCode, mut headers: HeaderMap, body: Body) -> Response {
+    sanitize_headers(&mut headers);
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    *response.headers_mut() = headers;
+    response
+}
+
 fn trim_ascii_whitespace(mut value: &[u8]) -> &[u8] {
     while value.first().is_some_and(u8::is_ascii_whitespace) {
         value = &value[1..];
@@ -69,7 +79,7 @@ mod tests {
 
     #[test]
     fn prefixes_paths_and_preserves_the_incoming_query() {
-        let destination = UrlIR::parse("https://example.test:8443/api/").unwrap();
+        let destination = "https://example.test:8443/api/".parse::<UrlIR>().unwrap();
         let uri = "/v1/a%2Fb?tag=one&tag=&encoded=%2F".parse().unwrap();
 
         let upstream = upstream_url(&destination, &uri);
@@ -82,13 +92,13 @@ mod tests {
 
     #[test]
     fn handles_root_destination_and_request_paths() {
-        let root = UrlIR::parse("http://example.test/").unwrap();
+        let root = "http://example.test/".parse::<UrlIR>().unwrap();
         assert_eq!(
             upstream_url(&root, &"/resource".parse().unwrap()).as_str(),
             "http://example.test/resource"
         );
 
-        let prefixed = UrlIR::parse("http://example.test/api").unwrap();
+        let prefixed = "http://example.test/api".parse::<UrlIR>().unwrap();
         assert_eq!(
             upstream_url(&prefixed, &"/".parse().unwrap()).as_str(),
             "http://example.test/api/"
