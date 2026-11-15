@@ -242,9 +242,10 @@ jobs:
     steps:
       - *checkout
       - *install-nix
-      - run: nix build --no-link --print-build-logs .#packages.${{ matrix.system }}.dockerImage
       - name: Export image for scanning
-        run: cp "$(nix build --no-link --print-out-paths .#packages.${{ matrix.system }}.dockerImage)" erm-image.tar.gz
+        run: |
+          nix build --out-link result --print-build-logs .#packages.${{ matrix.system }}.dockerImage
+          cp result erm-image.tar.gz
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: erm-image-${{ matrix.system }}
@@ -269,11 +270,15 @@ jobs:
         with:
           name: erm-image-${{ matrix.system }}
       - name: Load image
-        run: docker load --input erm-image.tar.gz
+        id: image
+        run: |
+          image_ref=$(docker load --input erm-image.tar.gz | sed -n 's/^Loaded image: //p')
+          image_id=$(docker image inspect --format '{{.Id}}' "$image_ref")
+          echo "id=$image_id" >> "$GITHUB_OUTPUT"
       - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: erm:0.1.0
+          image-ref: ${{ steps.image.outputs.id }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: 1

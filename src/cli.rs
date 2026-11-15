@@ -6,7 +6,7 @@ use url::Url;
 use crate::ir::UrlIR;
 
 #[derive(Debug, Parser)]
-#[command(version="0.1.0", about= "Record and replay proxy", long_about = None)]
+#[command(version, about = "Record and replay proxy", long_about = None)]
 pub struct Args {
     #[arg(long , short, value_parser = parse_destination)]
     pub destination: UrlIR,
@@ -42,6 +42,16 @@ fn parse_destination(value: &str) -> Result<UrlIR> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reports_cargo_package_version() {
+        let error = Args::try_parse_from(["erm", "--version"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
+        assert_eq!(
+            error.to_string(),
+            concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"), "\n")
+        );
+    }
 
     #[test]
     fn parses_http_and_https_destinations_with_base_paths() {

@@ -27,8 +27,8 @@
         system:
         let
 
-          name = "erm";
-          version = "0.1.0";
+          manifest = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+          inherit (manifest.package) name version;
           overlays = [ (import rust-overlay) ];
           pkgs = import nixpkgs { inherit system overlays; };
           rust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
@@ -47,13 +47,20 @@
             mainProgram = name;
             maintainers = [ "simon.theoret99@gmail.com" ];
           };
+          installCheckPhase = ''
+            runHook preInstallCheck
+            test "$("$out/bin/${name}" --version)" = "${name} ${version}"
+            runHook postInstallCheck
+          '';
           ermPackage = rustPlatform.buildRustPackage {
             pname = name;
             inherit version;
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
-            postInstall = ''
-              ${pkgs.binutils}/bin/strip --strip-unneeded $out/bin/erm
+            doInstallCheck = true;
+            inherit installCheckPhase;
+            postInstall = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              ${pkgs.binutils}/bin/strip --strip-unneeded "$out/bin/${name}"
             '';
             inherit meta;
           };
@@ -62,8 +69,10 @@
             inherit version;
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
-            postInstall = ''
-              ${pkgs.binutils}/bin/strip --strip-unneeded $out/bin/erm
+            doInstallCheck = true;
+            inherit installCheckPhase;
+            postInstall = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              ${pkgs.binutils}/bin/strip --strip-unneeded "$out/bin/${name}"
             '';
             inherit meta;
           };
