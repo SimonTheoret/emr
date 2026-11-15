@@ -7,11 +7,16 @@ use std::{fmt, str::FromStr};
 
 use super::Exchange;
 
+#[cfg(not(any(feature = "ron", feature = "json")))]
+compile_error!("enable at least one storage format feature: `ron` or `json`");
+
 /// The file format that the filesystem storage reads and writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatKind {
     #[cfg(feature = "ron")]
     Ron,
+    #[cfg(feature = "json")]
+    Json,
 }
 
 impl FormatKind {
@@ -19,6 +24,8 @@ impl FormatKind {
         match self {
             #[cfg(feature = "ron")]
             Self::Ron => &ron::Ron,
+            #[cfg(feature = "json")]
+            Self::Json => &json::Json,
         }
     }
 }
@@ -30,6 +37,8 @@ impl FromStr for FormatKind {
         match value {
             #[cfg(feature = "ron")]
             "ron" => Ok(Self::Ron),
+            #[cfg(feature = "json")]
+            "json" => Ok(Self::Json),
             other => Err(format!("unknown or disabled storage format: {other}")),
         }
     }
