@@ -50,10 +50,15 @@ pub(crate) mod tests {
 
     use super::*;
 
+    const TOKEN: &[u8] =
+        b"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+    /// Names that `http::HeaderName` accepts: one or more RFC 9110 token characters, in any
+    /// case, since `new` lowercases them.
     pub(crate) fn header_name_strategy() -> impl Strategy<Value = HeaderNameIR> {
-        prop::collection::vec(0_u8..=127, 0..64)
-            .prop_map(Bytes::from)
-            .prop_map(HeaderNameIR::new)
+        // A character table, not a regex: storage tests build this strategy once per exchange.
+        prop::collection::vec(prop::sample::select(TOKEN), 1..64)
+            .prop_map(|name| HeaderNameIR::new(Bytes::from(name)))
     }
 
     #[test]

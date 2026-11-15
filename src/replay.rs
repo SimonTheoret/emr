@@ -38,8 +38,6 @@ async fn replay(
         return Err(NotFound(id));
     };
     let response = &exchange.response;
-    // TODO: these two conversions unwrap, so a hand-edited file with an invalid header name or
-    // status panics here. See "Open questions" in the rationale.
     Ok(proxy::client_response(
         response.parts.status.into(),
         response.parts.headers.clone().into(),
@@ -250,5 +248,38 @@ mod tests {
             !response.headers().contains_key(header::TRANSFER_ENCODING),
             "the recorded framing header is not replayed"
         );
+    }
+
+    #[cfg(feature = "ron")]
+    #[test]
+    fn a_file_with_an_invalid_status_or_header_fails_to_load() {
+        use std::fs;
+
+        use tempfile::TempDir;
+
+        use crate::storage::{FormatKind, Recorder};
+
+        let cases = [
+            ("status 42", "status: 200", "status: 42"),
+            ("header name", r#"b"x-test""#, r#"b"x test""#),
+            ("header value", r#"b"value""#, r#"b"line\nbreak""#),
+        ];
+        for (case, valid, invalid) in cases {
+            let dir = TempDir::new().unwrap();
+            let (recorder, writer) = storage::recorder(dir.path(), FormatKind::Ron).unwrap();
+            recorder.save(exchange("edited", &[("x-test", "value")], &[]));
+            writer.finish();
+            let path = dir.path().join("edited.ron");
+            let recorded = fs::read_to_string(&path).unwrap();
+            assert!(recorded.contains(valid), "{case}: the file holds {valid}");
+            fs::write(&path, recorded.replacen(valid, invalid, 1)).unwrap();
+
+            let Err(error) = storage::replayer(dir.path(), FormatKind::Ron) else {
+                panic!("{case}: the edited file loads");
+            };
+
+            let paths: Vec<_> = error.files.iter().map(|file| &file.path).collect();
+            assert_eq!(paths, [&path], "{case}: the edited file is reported");
+        }
     }
 }
