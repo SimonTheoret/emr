@@ -2,10 +2,6 @@
 
 Differences between the code and [the storage spec](spec.md). Delete an entry when the code matches the spec.
 
-## 1. Introduction and goals
-
-- **Modes.** There is no Replaying mode. `erm record` is the only subcommand.
-
 ## 2. Architecture constraints
 
 - **Platforms.** CI runs `cargo test` only on Linux. It builds on Windows and macOS but runs no tests there.
@@ -16,8 +12,7 @@ Differences between the code and [the storage spec](spec.md). Delete an entry wh
 
 ## 10. Quality requirements
 
-- **Q1 and Q2.** Partly covered. Each format's `exchanges_round_trip` proptest round-trips an exchange in memory, and `saving_an_id_again_replaces_its_file` checks the file, but no test restarts in Replaying mode.
-- **Q3 and Q4.** Partly covered. Loader unit tests check both cases, but no test starts ERM.
+- **Q4.** Partly covered. A loader unit test checks it, but no test starts ERM.
 - **Q5.** Partly covered. `a_failed_write_exits_with_status_1` runs the writer's exit path in a test process, not in the `erm` binary.
 - **Q6.** No test.
 - **Q8.** CI never builds without the `ron` feature.
