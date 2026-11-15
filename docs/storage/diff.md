@@ -32,7 +32,7 @@ Differences between the code and [the storage spec](spec.md). Delete an entry wh
 ## 6. Runtime view
 
 - **Startup.** `MockFileStorage::new` creates a missing directory in every run. `load_all_files` walks subdirectories recursively, skips dot-prefixed paths, and loads nothing when the directory itself is dot-prefixed. It logs no warning for an empty directory.
-- **Shutdown.** `main` calls `axum::serve` without graceful shutdown. Serializer tasks are detached, so exchanges still being written at exit are lost.
+- **Shutdown.** Serializer tasks are detached, so exchanges still being written at exit are lost.
 
 ## 8. Cross-cutting concepts
 

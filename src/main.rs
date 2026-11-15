@@ -23,11 +23,12 @@ mod ir;
 mod legacy_storage;
 pub mod matching;
 mod proxy;
+mod server;
 // The record and replay modes start using it later in this stack.
 #[allow(dead_code, unused_imports)]
 mod storage;
 use crate::{
-    cli::Args,
+    cli::{Cli, Mode},
     ir::{
         BodyStream, ERMRequest, ERMRequestParts, ERMResponse, ERMResponseParts, FinalRequest,
         FinalResponse, HeadersIR, Mock, StatusCodeIR, TimedFrame, UrlIR, VersionIR,
@@ -168,11 +169,11 @@ async fn handle_request(State(app_state): State<AppState>, req: Request) -> ERMR
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().init();
-    let args = Args::parse();
+    let Mode::Record(args) = Cli::parse().mode;
     info!("Tracing subscriber initialized");
     let config = Config {
         destination: args.destination,
-        mock_dir: args.mock_dir,
+        mock_dir: args.serve.mock_dir,
     };
     let storage = Arc::new(Mutex::new(
         MockFileStorage::new(&config.mock_dir, SERIALIZATION_EXTENSION)
@@ -194,7 +195,6 @@ async fn main() -> Result<()> {
         .route("/{*wildcard}", any(handle_request))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
-    axum::serve(listener, app).await?;
+    server::serve(args.serve.port, app).await?;
     Ok(())
 }

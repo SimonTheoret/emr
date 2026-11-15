@@ -26,7 +26,7 @@ let
       serviceConfig = {
         DynamicUser = true;
         StateDirectory = name;
-        ExecStart = "${lib.getExe erm} --destination ${destination} --mock-dir ${mockDirectory} -p ${toString port}";
+        ExecStart = "${lib.getExe erm} record --destination ${destination} --mock-dir ${mockDirectory} -p ${toString port}";
       };
     };
 in
