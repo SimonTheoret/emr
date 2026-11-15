@@ -267,9 +267,8 @@ jobs:
       - name: Load image
         id: image
         run: |
-          config=$(tar -xOf erm-image.tar.gz manifest.json | jq -r '.[0].Config')
-          image_id="sha256:$(tar -xOf erm-image.tar.gz "$config" | sha256sum | cut -d ' ' -f 1)"
-          docker load --input erm-image.tar.gz
+          image_ref=$(docker load --input erm-image.tar.gz | sed -n 's/^Loaded image: //p')
+          image_id=$(docker image inspect --format '{{.Id}}' "$image_ref")
           echo "id=$image_id" >> "$GITHUB_OUTPUT"
       - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
