@@ -1,3 +1,5 @@
+#[cfg(feature = "json")]
+mod json;
 #[cfg(feature = "ron")]
 mod ron;
 
