@@ -111,6 +111,14 @@ The filesystem storage does not call `fsync`. A power loss or an OS crash can st
 
 If writing an exchange fails, ERM prints an error that names the file and the cause, then exits with a non-zero status. ERM never keeps proxying without recording.
 
+### Redirects while recording
+
+ERM never follows a redirect. The client follows it, through ERM, so ERM records each hop.
+
+When the upstream answers with a `3xx` status, ERM resolves each `Location` against the URL it called. If the target has the destination's scheme, host, and port, and its path is under the destination's path, ERM replaces `Location` with the rest of the path and the query. The client's next request then goes through ERM to the same target. ERM saves the response with the replaced `Location`, so replaying needs no destination.
+
+If the target is outside the destination, ERM answers `502 Bad Gateway` with a message that names the `Location`, and saves nothing.
+
 ### Corrupted files while replaying
 
 A file is corrupted if it does not parse in the selected format, or if its name does not match the `id` it contains. At startup, ERM checks every file, prints each corrupted file with the cause, then exits with a non-zero status before it accepts connections.
@@ -138,6 +146,7 @@ Every scenario passes on Linux, macOS, and Windows, with every compiled-in forma
 | The filesystem storage does not call `fsync`. | A power loss or an OS crash can lose a recent recording or leave its file empty. | The startup check reports an empty file as corrupted. Add `File::sync_all` before the rename if this matters. |
 | Two ERM processes record into one directory. | Both write the same `<id>.<ext>.tmp` and can corrupt it. | Run one ERM process per directory. |
 | On Windows, another program has `<id>.<ext>` open while ERM replaces it. | The rename fails, and ERM exits. | The error names the file. Close the program and record again. |
+| A client follows a redirect and sends the same `x-erm-match` value again. | The next hop replaces the `3xx` exchange, so replaying answers the first request with the last hop. | Save each hop in its own file. |
 
 ## 12. Glossary
 
@@ -148,6 +157,7 @@ Every scenario passes on Linux, macOS, and Windows, with every compiled-in forma
 | Recording | The mode in which ERM proxies every request to the upstream and saves each exchange. |
 | Replaying | The mode in which ERM answers every request with `find` and never contacts the upstream. |
 | Upstream | The service that ERM proxies requests to. |
+| Destination | The upstream URL that Recording mode is started with. ERM adds its path in front of every request path. |
 | Filesystem storage | The directory of exchange files, and the code that writes and loads them. |
 | In-memory storage | The map from `id` to exchange that answers `find` when replaying. |
 | Format | A serialization format that a Cargo feature compiles in and the configuration selects. |
