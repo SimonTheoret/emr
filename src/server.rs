@@ -1,4 +1,4 @@
-use std::{io, net::Ipv4Addr};
+use std::{future::pending, io, net::Ipv4Addr};
 
 use axum::Router;
 use tokio::net::TcpListener;
@@ -12,12 +12,32 @@ pub async fn serve(port: u16, router: Router) -> io::Result<()> {
         .await
 }
 
+/// Resolves on the first Ctrl-C, or SIGTERM on Unix. A listener that fails to install is
+/// logged and never resolves, because resolving would stop the server the moment it starts.
 async fn shutdown_signal() {
-    // TODO: resolve when the first of these resolves:
-    //   tokio::signal::ctrl_c()
-    //   #[cfg(unix)] tokio::signal::unix::signal(SignalKind::terminate()), then `.recv()`
-    //   #[cfg(not(unix))] std::future::pending::<()>()
-    // If a handler fails to install, log it and let that branch pend forever. Resolving
-    // instead would stop the server the moment it starts.
-    todo!("wait for Ctrl-C or SIGTERM")
+    let ctrl_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            tracing::error!("cannot listen for Ctrl-C: {error}");
+            pending::<()>().await;
+        }
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                terminate.recv().await;
+            }
+            Err(error) => {
+                tracing::error!("cannot listen for SIGTERM: {error}");
+                pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {}
+        () = terminate => {}
+    }
 }
