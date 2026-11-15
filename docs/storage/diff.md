@@ -12,7 +12,4 @@ Differences between the code and [the storage spec](spec.md). Delete an entry wh
 
 ## 10. Quality requirements
 
-- **Q4.** Partly covered. A loader unit test checks it, but no test starts ERM.
-- **Q5.** Partly covered. `a_failed_write_exits_with_status_1` runs the writer's exit path in a test process, not in the `erm` binary.
-- **Q6.** No test.
 - **Q8.** CI never builds without the `ron` feature.
