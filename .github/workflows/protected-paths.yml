@@ -1,0 +1,42 @@
+name: Protected paths
+
+# main's copy runs, so a PR cannot edit this guard to pass. Never check out PR code here.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions: {}
+
+concurrency:
+  group: protected-paths-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  protected-paths:
+    name: protected paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Require the integration label to change tests or CI wiring
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'integration') }}
+        run: |
+          files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)')
+          protected=$(grep -E '^(tests/|flake\.nix$|\.github/workflows/(ci|protected-paths)\.yml$)' <<<"$files" | sort -u || true)
+          if [[ -z $protected ]]; then
+            echo "No protected path changed."
+          elif [[ $LABELED == true ]]; then
+            echo "::notice title=Protected paths changed::The integration label allows this PR to change tests or CI wiring."
+            echo "$protected"
+          else
+            echo "::error title=Protected paths changed::This PR changes tests or CI wiring. A maintainer must add the integration label."
+            echo "$protected"
+            exit 1
+          fi

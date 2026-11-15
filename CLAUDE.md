@@ -31,6 +31,9 @@ replay/matching exists as a library function but is not called from the request 
   container image.
 - `.github/workflows/ci.yml` runs formatting, Clippy, tests, compilation, Nix packaging, and the
   Nix-built Docker image for pull requests and pushes to `main`.
+- `.github/workflows/protected-paths.yml` fails a PR that changes `tests/`, `flake.nix`, `ci.yml`,
+  or itself unless the PR has the `integration` label. It runs `main`'s copy
+  (`pull_request_target`), so a change to the guard takes effect only after merge.
 
 ## Architecture
 
