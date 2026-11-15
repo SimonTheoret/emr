@@ -457,4 +457,93 @@ mod tests {
 
         assert!(saved(receiver).is_empty(), "nothing is saved");
     }
+
+    #[cfg(feature = "ron")]
+    #[tokio::test]
+    async fn q1_a_recorded_exchange_replays_as_the_caller_saw_it() {
+        use http::HeaderMap;
+        use tempfile::TempDir;
+
+        use crate::{
+            replay,
+            storage::{FormatKind, Id, Replayer},
+        };
+
+        /// What a caller sees of a response.
+        #[derive(Debug, PartialEq)]
+        struct Seen {
+            status: StatusCode,
+            headers: HeaderMap,
+            body: Bytes,
+        }
+
+        impl Seen {
+            async fn of(response: reqwest::Response) -> Self {
+                Self {
+                    status: response.status(),
+                    headers: response.headers().clone(),
+                    body: response.bytes().await.unwrap(),
+                }
+            }
+        }
+
+        let dir = TempDir::new().unwrap();
+        let upstream = upstream().await;
+        let (recorder, writer) = storage::recorder(dir.path(), FormatKind::Ron).unwrap();
+        let proxy = Proxy::start(&upstream.url, recorder).await;
+        let request_frames: [&[u8]; 2] = [b"\x00\x01", b"\xfe\xff"];
+        let request_body = stream::iter(request_frames).then(|frame| async move {
+            sleep(FRAME_DELAY).await;
+            Ok::<_, Infallible>(Bytes::from_static(frame))
+        });
+
+        let response = caller()
+            .post(proxy.url("/frames"))
+            .header(MATCH, "q1")
+            .body(reqwest::Body::wrap_stream(request_body))
+            .send()
+            .await
+            .unwrap();
+        let recorded = Seen::of(response).await;
+        proxy.stop().await;
+        writer.finish();
+
+        let replayer = storage::replayer(dir.path(), FormatKind::Ron).unwrap();
+        let exchange = replayer
+            .find(&Id::parse(b"q1").unwrap())
+            .expect("the exchange loads from the directory it was recorded in");
+        let request: Vec<&[u8]> = exchange
+            .request
+            .body
+            .iter()
+            .map(|f| &f.content[..])
+            .collect();
+        assert_eq!(
+            request, request_frames,
+            "the request keeps its binary frames"
+        );
+        let response: Vec<&[u8]> = exchange
+            .response
+            .body
+            .iter()
+            .map(|f| &f.content[..])
+            .collect();
+        assert_eq!(response, FRAMES, "the response keeps its binary frames");
+        for frame in &exchange.response.body {
+            assert!(
+                frame.tslf >= FRAME_DELAY / 2,
+                "each response frame keeps its delay: {:?}",
+                frame.tslf
+            );
+        }
+        assert_eq!(
+            recorded.headers.get_all(header::SET_COOKIE).iter().count(),
+            2,
+            "the caller saw both set-cookie headers"
+        );
+
+        let replay = serve(replay::router(Arc::new(replayer))).await;
+        let replayed = Seen::of(send(Method::GET, format!("{}/", replay.url), "q1").await).await;
+        assert_eq!(replayed, recorded, "replay answers as recording did");
+    }
 }
