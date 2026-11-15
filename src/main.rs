@@ -2,12 +2,10 @@ use clap::Parser;
 
 mod cli;
 mod ir;
-// The old recorder's storage and matching, deleted by the next changes.
+// The old recorder's storage, deleted by the next changes.
 #[allow(dead_code)]
 mod legacy_storage;
 mod match_id;
-#[allow(dead_code)]
-pub mod matching;
 mod proxy;
 mod record;
 mod server;
