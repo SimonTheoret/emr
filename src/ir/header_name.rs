@@ -118,6 +118,7 @@ pub(crate) mod tests {
         assert_ne!(name, Bytes::from_static(b"x-other"));
     }
 
+    #[cfg(feature = "ron")]
     #[test]
     fn serialization_uses_the_normalized_bytes() {
         let name = HeaderNameIR::new(Bytes::from_static(b"X-Test"));
@@ -128,6 +129,7 @@ pub(crate) mod tests {
         assert_eq!(bytes, Bytes::from_static(b"x-test"));
     }
 
+    #[cfg(feature = "ron")]
     #[test]
     fn deserialization_normalizes_ascii_case() {
         let serialized = ron::to_string(&Bytes::from_static(b"X-TEST")).unwrap();
@@ -137,6 +139,7 @@ pub(crate) mod tests {
         assert_eq!(name, Bytes::from_static(b"x-test"));
     }
 
+    #[cfg(feature = "ron")]
     proptest! {
         #[test]
         fn normalized_ascii_name_round_trips_through_ron(name in header_name_strategy()) {

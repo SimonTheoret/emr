@@ -12,7 +12,7 @@ use std::{io, path::Path};
 pub use exchange::Exchange;
 pub use format::FormatKind;
 pub use id::{Id, InvalidId};
-pub use loader::{FileError, LoadError};
+pub use loader::LoadError;
 pub use recorder::Writer;
 
 pub trait Recorder: Send + Sync + 'static {

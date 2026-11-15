@@ -1,5 +1,4 @@
-use axum::extract::Request;
-use uuid::Uuid;
+use http::request::Parts;
 
 use super::{HeadersIR, MethodIR, UriIR, VersionIR};
 
@@ -9,24 +8,22 @@ pub struct ERMRequestParts {
     pub version: VersionIR,
     pub headers: HeadersIR,
     pub uri: UriIR,
-    pub id: Uuid,
 }
 
-impl ERMRequestParts {
-    pub fn clone_from_request(req: &Request, id: Uuid) -> Self {
+/// Records the request as it arrived, before `sanitize_headers` touches the forwarded copy.
+impl From<&Parts> for ERMRequestParts {
+    fn from(parts: &Parts) -> Self {
         Self {
-            method: req.method().clone().into(),
-            version: req.version().into(),
-            headers: req.headers().clone().into(),
-            uri: req.uri().clone().into(),
-            id,
+            method: parts.method.clone().into(),
+            version: parts.version.into(),
+            headers: parts.headers.clone().into(),
+            uri: parts.uri.clone().into(),
         }
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use axum::body::Body;
     use http::{Method, Request, Version};
     use proptest::prelude::*;
 
@@ -42,40 +39,37 @@ pub(crate) mod tests {
             version_strategy(),
             headers_strategy(),
             uri_strategy(),
-            any::<u128>().prop_map(Uuid::from_u128),
         )
-            .prop_map(|(method, version, headers, uri, id)| ERMRequestParts {
+            .prop_map(|(method, version, headers, uri)| ERMRequestParts {
                 method,
                 version,
                 headers,
                 uri,
-                id,
             })
     }
 
     #[test]
-    fn clone_from_request_copies_all_request_parts() {
-        let request = Request::builder()
+    fn copies_every_request_part() {
+        let (request, ()) = Request::builder()
             .method(Method::PATCH)
             .version(Version::HTTP_2)
             .uri("/resource?query=value")
             .header("x-test", "value")
             .header("set-cookie", "first=1")
             .header("set-cookie", "second=2")
-            .body(Body::empty())
-            .unwrap();
-        let id = Uuid::from_u128(42);
+            .body(())
+            .unwrap()
+            .into_parts();
 
-        let parts = ERMRequestParts::clone_from_request(&request, id);
+        let parts = ERMRequestParts::from(&request);
 
         assert_eq!(parts.method, MethodIR::Patch);
         assert_eq!(parts.version, VersionIR::Http2);
-        assert_eq!(parts.uri.0, request.uri().clone());
+        assert_eq!(parts.uri.0, request.uri);
         let headers: http::HeaderMap = parts.headers.into();
         assert_eq!(headers["x-test"], "value");
         assert_eq!(headers.get_all("set-cookie").iter().count(), 2);
         assert_eq!(headers.keys().count(), 2);
         assert_eq!(headers.len(), 3);
-        assert_eq!(parts.id, id);
     }
 }

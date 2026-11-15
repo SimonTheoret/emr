@@ -6,6 +6,7 @@ let
   upstreamHttpsPort = 8443;
   ermHttpPort = 4321;
   ermHttpsPort = 4322;
+  casesPerPair = 200;
   pythonEnv = pkgs.python3.withPackages (ps: [ ps.requests ]);
 
   mkErmService =
@@ -26,7 +27,7 @@ let
       serviceConfig = {
         DynamicUser = true;
         StateDirectory = name;
-        ExecStart = "${lib.getExe erm} --destination ${destination} --mock-dir ${mockDirectory} -p ${toString port}";
+        ExecStart = "${lib.getExe erm} record --destination ${destination} --mock-dir ${mockDirectory} -p ${toString port}";
       };
     };
 in
@@ -152,9 +153,14 @@ pkgs.testers.runNixOSTest {
 
     # Random requests through both proxies, compared against go-httpbin's echo.
     proxy.succeed(
-        "python3 ${./echo.py} "
+        "python3 ${./echo.py} --count ${toString casesPerPair} "
         "--pair http://127.0.0.1:${toString ermHttpPort} http://upstream:${toString upstreamHttpPort} "
         "--pair http://127.0.0.1:${toString ermHttpsPort} https://upstream:${toString upstreamHttpsPort}"
     )
+
+    # SIGTERM drains the writer, so every case's exchange is on disk once the units stop.
+    proxy.succeed("systemctl stop erm-http.service erm-https.service")
+    for name in ("erm-http", "erm-https"):
+        proxy.succeed(f"test $(ls /var/lib/{name}/mocks | wc -l) -eq ${toString casesPerPair}")
   '';
 }

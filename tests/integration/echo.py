@@ -189,6 +189,9 @@ def generate_case(rng: random.Random, name: str, proxy: str, upstream: str) -> C
         if rng.random() < 0.5:
             chunks = split_chunks(rng, body)
 
+    # erm records each case under this id, so it must be unique per proxy and valid as an `Id`.
+    headers.append((random_case_of(rng, "x-erm-match"), f"case-{name}"))
+
     rng.shuffle(headers)
     return Case(
         name=name,
