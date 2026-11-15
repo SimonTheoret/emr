@@ -8,7 +8,6 @@ Differences between the code and [the storage spec](spec.md). Delete an entry wh
 
 ## 2. Architecture constraints
 
-- **Module.** The old storage, `src/legacy_storage.rs`, still exists, though nothing uses it.
 - **Platforms.** CI runs `cargo test` only on Linux. It builds on Windows and macOS but runs no tests there.
 
 ## 8. Cross-cutting concepts

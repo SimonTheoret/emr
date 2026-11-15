@@ -1,4 +1,4 @@
-// The old recorder's types and file format, deleted by the next changes.
+// The old recorder's types, deleted by the next change.
 #[allow(dead_code)]
 mod body_stream;
 #[allow(dead_code)]
@@ -13,8 +13,6 @@ mod header_name;
 mod header_value;
 mod headers;
 mod method;
-#[allow(dead_code)]
-mod mock;
 mod status_code;
 mod timed_frame;
 mod uri;
@@ -35,7 +33,6 @@ pub use header_name::HeaderNameIR;
 pub use header_value::HeaderValueIR;
 pub use headers::HeadersIR;
 pub use method::MethodIR;
-pub use mock::Mock;
 pub use status_code::StatusCodeIR;
 pub use timed_frame::TimedFrame;
 pub use uri::UriIR;
