@@ -16,7 +16,7 @@ Differences between the code and [the storage spec](spec.md). Delete an entry wh
 ## 2. Architecture constraints
 
 - **Format.** RON is hard-coded, with no Cargo feature and no configuration option. `src/main.rs` owns the extension (`SERIALIZATION_EXTENSION`) and calls `Mock::to_pretty_ron` itself.
-- **Module.** There are no `Recorder` or `Replayer` traits. `src/storage.rs` exposes the concrete `MockFileStorage` type and its `mocks` method.
+- **Module.** `src/storage/` defines the spec's API, but nothing outside it uses it yet. `main.rs` allows dead code and unused imports on `mod storage`, and still uses the old `MockFileStorage` from `src/legacy_storage.rs`.
 - **Platforms.** CI runs `cargo test` only on Linux. It builds on Windows and macOS but runs no tests there.
 
 ## 3. Context and scope

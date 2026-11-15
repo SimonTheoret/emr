@@ -3,6 +3,11 @@ name = "erm"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["ron"]
+ron = []
+json = []
+
 [lints.rust]
 dead_code = "deny"
 

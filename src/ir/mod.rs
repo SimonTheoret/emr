@@ -33,3 +33,8 @@ pub use timed_frame::TimedFrame;
 pub use uri::UriIR;
 pub use url::UrlIR;
 pub use version::VersionIR;
+
+#[cfg(test)]
+pub(crate) use final_request::tests::final_request_strategy;
+#[cfg(test)]
+pub(crate) use final_response::tests::final_response_strategy;
