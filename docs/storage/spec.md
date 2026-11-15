@@ -129,3 +129,25 @@ Every scenario passes on Linux, macOS, and Windows, with every compiled-in forma
 | Q6 | Correctness | Send Ctrl-C while exchanges are queued. | Every queued exchange is on disk before ERM exits. |
 | Q7 | Correctness | Call `Id::parse` with an uppercase letter, a `/`, `con`, an empty string, and 201 characters. | Each call returns an error. |
 | Q8 | Encapsulation | Change the selected format in the configuration, or build with a different set of format features. | No code outside the storage module changes. |
+
+## 11. Risks and technical debt
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| All exchanges live in memory when replaying. | Large recordings can exhaust memory. | Spill exchanges to disk and keep only an index in memory. |
+| The filesystem storage does not call `fsync`. | A power loss or an OS crash can lose a recent recording or leave its file empty. | The startup check reports an empty file as corrupted. Add `File::sync_all` before the rename if this matters. |
+| Two ERM processes record into one directory. | Both write the same `<id>.<ext>.tmp` and can corrupt it. | Run one ERM process per directory. |
+| On Windows, another program has `<id>.<ext>` open while ERM replaces it. | The rename fails, and ERM exits. | The error names the file. Close the program and record again. |
+
+## 12. Glossary
+
+| Term | Definition |
+|---|---|
+| Exchange | One recorded request and its response. |
+| `id` | The value of the request's `x-erm-match` header. It identifies an exchange and names its file. |
+| Recording | The mode in which ERM proxies every request to the upstream and saves each exchange. |
+| Replaying | The mode in which ERM answers every request with `find` and never contacts the upstream. |
+| Upstream | The service that ERM proxies requests to. |
+| Filesystem storage | The directory of exchange files, and the code that writes and loads them. |
+| In-memory storage | The map from `id` to exchange that answers `find` when replaying. |
+| Format | A serialization format that a Cargo feature compiles in and the configuration selects. |
