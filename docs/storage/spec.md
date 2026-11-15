@@ -67,6 +67,21 @@ When replaying, ERM loads the in-memory storage from the filesystem storage at s
 
 ## 6. Runtime view
 
+### Startup
+
+| Mode | Steps |
+|---|---|
+| Recording | Creates the directory if it is missing, then starts the writer thread. |
+| Replaying | Loads every `<id>.<ext>` file at the top level of the directory into the in-memory storage. If the directory is missing or holds no exchanges, logs a warning and starts with no exchanges. |
+
+Both modes ignore subdirectories, `.tmp` files, and files with another extension.
+
+### Saving an exchange
+
+1. The request handler calls `save`, which queues the exchange and returns.
+2. The writer thread takes the next exchange, writes `<id>.<ext>.tmp`, and renames it to `<id>.<ext>`.
+3. If the write fails, ERM exits. See [Filesystem errors while recording](#filesystem-errors-while-recording).
+
 ### Shutdown
 
 On Ctrl-C, or SIGTERM on Linux and macOS, ERM stops accepting connections, finishes in-flight requests, writes every queued exchange, and exits.
