@@ -1,199 +1,24 @@
 use clap::Parser;
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    time::Instant,
-};
-use tracing::{debug, info, instrument};
-use uuid::Uuid;
-
-use axum::{Router, extract::Request, extract::State, routing::any};
-use eyre::{Context, Result};
-use futures::StreamExt;
-use http_body_util::BodyDataStream as HttpBodyDataStream;
-
-use reqwest::{Client, ClientBuilder};
-use tokio::{
-    sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
-    task::spawn,
-};
 
 mod cli;
 mod ir;
-mod legacy_storage;
-pub mod matching;
+mod match_id;
 mod proxy;
-#[allow(dead_code, unused_imports)]
+mod record;
+mod replay;
+mod server;
+// TODO(sketch): drop this allow once `loader.rs` and `recorder.rs` land. Their stubs never
+// call `Format::serialize` or `Format::deserialize`, which `dead_code = "deny"` rejects.
+#[allow(dead_code)]
 mod storage;
-use crate::{
-    cli::Args,
-    ir::{
-        BodyStream, ERMRequest, ERMRequestParts, ERMResponse, ERMResponseParts, FinalRequest,
-        FinalResponse, HeadersIR, Mock, StatusCodeIR, TimedFrame, UrlIR, VersionIR,
-    },
-    legacy_storage::MockFileStorage,
-    proxy::{sanitize_headers, upstream_url},
-};
 
-const SERIALIZATION_EXTENSION: &str = "ron";
-
-#[derive(Clone)]
-struct Config {
-    destination: UrlIR,
-    mock_dir: PathBuf,
-}
-
-async fn send_request(
-    req: ERMRequest,
-    state: AppState,
-    id: Uuid,
-    channel: UnboundedSender<TimedFrame>,
-) -> Result<ERMResponse> {
-    let (client, config) = (state.client, state.config);
-    let destination = upstream_url(&config.destination, &req.uri);
-    let mut headers: http::HeaderMap = req.headers.into();
-    sanitize_headers(&mut headers);
-    let res = client
-        .request(req.method.into(), destination.0)
-        .headers(headers)
-        .version(req.version.into())
-        .body(reqwest::Body::wrap_stream(req.body.0))
-        .send()
-        .await
-        .wrap_err("Could not send the request")?;
-    let url = res.url().clone();
-    let status = res.status();
-    let res_http: http::Response<reqwest::Body> = res.into();
-    let (parts, body) = res_http.into_parts();
-    let mut last_frame_time: Option<Instant> = None;
-    let raw_res = ERMResponse {
-        url: UrlIR(url),
-        version: VersionIR::from(parts.version),
-        headers: HeadersIR::from(parts.headers),
-        status: StatusCodeIR::from(status),
-        id,
-        body: BodyStream(
-            axum::body::Body::new(axum::body::Body::from_stream(
-                HttpBodyDataStream::new(body).map(move |b| match b {
-                    Err(e) => Err(e),
-                    Ok(bytes) => {
-                        let now = Instant::now();
-                        channel
-                            .send(TimedFrame {
-                                content: bytes.clone(),
-                                tslf: now - last_frame_time.unwrap_or(now),
-                            })
-                            .expect("Error when sending bytes over a channel (Sending request)");
-                        last_frame_time = Some(now);
-                        Ok(bytes)
-                    }
-                }),
-            ))
-            .into_data_stream(),
-        ),
-    };
-    Ok(raw_res)
-}
-
-#[derive(Clone)]
-struct AppState {
-    client: Client,
-    config: Config,
-    storage: Arc<Mutex<MockFileStorage>>,
-}
-
-async fn serialize_response(
-    parts: ERMResponseParts,
-    mut channel: UnboundedReceiver<TimedFrame>,
-    mut dir: PathBuf,
-) -> Result<()> {
-    let id = parts.id;
-    let mut data = Vec::with_capacity(1 << 5);
-    while let Some(tf) = channel.recv().await {
-        data.push(tf);
-    }
-    let ser_res = Mock::Response(FinalResponse { parts, body: data });
-    let content = ser_res.to_pretty_ron()?;
-    dir.push(format!("response_{}.ron", id.clone()));
-    std::fs::write(dir, content)?;
-    Ok(())
-}
-
-async fn serialize_request(
-    parts: ERMRequestParts,
-    mut channel: UnboundedReceiver<TimedFrame>,
-    mut dir: PathBuf,
-) -> Result<()> {
-    let id = parts.id;
-    let mut data = Vec::with_capacity(1 << 5);
-    while let Some(tf) = channel.recv().await {
-        data.push(tf);
-    }
-    let ser_res = Mock::Request(FinalRequest { parts, body: data });
-    let content = ser_res.to_pretty_ron()?;
-    dir.push(format!("request_{}.ron", id.clone()));
-    std::fs::write(dir, content)?;
-    Ok(())
-}
-
-#[instrument(skip(app_state, req))]
-async fn handle_request(State(app_state): State<AppState>, req: Request) -> ERMResponse {
-    let id = Uuid::now_v7();
-    let mock_dir = app_state.config.mock_dir.clone();
-    let storage = app_state.storage.clone();
-    let (req_sender, req_recv) = unbounded_channel::<TimedFrame>();
-    let (res_sender, res_recv) = unbounded_channel::<TimedFrame>();
-
-    spawn(serialize_request(
-        ERMRequestParts::clone_from_request(&req, id),
-        req_recv,
-        mock_dir.clone(),
-    ));
-    let raw_req = ERMRequest::from_request(req, req_sender)
-        .await
-        .expect("Error when extracting the request");
-    let res = send_request(raw_req, app_state, id, res_sender)
-        .await
-        .expect("Error when sending the request");
-    spawn(serialize_response(res.clone_parts(), res_recv, mock_dir));
-    let mut guard = storage.lock().unwrap();
-    let files = guard
-        .mocks()
-        .expect("Error when reading the files from the storage");
-    debug!(mock_count = files.len(), "refreshed mock storage");
-    res
-}
+use crate::cli::{Cli, Mode};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt().init();
-    let args = Args::parse();
-    info!("Tracing subscriber initialized");
-    let config = Config {
-        destination: args.destination,
-        mock_dir: args.mock_dir,
-    };
-    let storage = Arc::new(Mutex::new(
-        MockFileStorage::new(&config.mock_dir, SERIALIZATION_EXTENSION)
-            .expect("Error when creating the storage"),
-    ));
-    let client = ClientBuilder::new()
-        .use_rustls_tls()
-        .user_agent("erm")
-        .build()
-        .expect("could not build the Reqwest client");
-    let state = AppState {
-        client,
-        config,
-        storage,
-    };
-
-    let app = Router::new()
-        .route("/", any(handle_request))
-        .route("/{*wildcard}", any(handle_request))
-        .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await?;
-    axum::serve(listener, app).await?;
-    Ok(())
+    match Cli::parse().mode {
+        Mode::Record(args) => record::run(args).await,
+        Mode::Replay(args) => replay::run(args).await,
+    }
 }

@@ -19,12 +19,6 @@ impl FromStr for UrlIR {
     }
 }
 
-impl UrlIR {
-    pub fn parse(s: &str) -> Result<Self> {
-        Self::from_str(s)
-    }
-}
-
 impl From<Url> for UrlIR {
     fn from(value: Url) -> Self {
         Self(value)
@@ -46,12 +40,6 @@ impl AsRef<str> for UrlIR {
         self.0.as_str()
     }
 }
-impl UrlIR {
-    pub fn as_str(&self) -> &str {
-        self.as_ref()
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use proptest::prelude::*;

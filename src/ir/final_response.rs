@@ -1,17 +1,9 @@
-use uuid::Uuid;
-
 use super::{ERMResponseParts, TimedFrame};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FinalResponse {
     pub parts: ERMResponseParts,
     pub body: Vec<TimedFrame>,
-}
-
-impl FinalResponse {
-    pub fn id(&self) -> &Uuid {
-        &self.parts.id
-    }
 }
 
 #[cfg(test)]
