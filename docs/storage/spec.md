@@ -1,6 +1,6 @@
 # Storage specification
 
-The structure follows [arc42](https://arc42.org).
+The structure follows [arc42](https://arc42.org). Sections 7 and 9 are omitted. Section 4 records the decisions.
 
 ## 1. Introduction and goals
 
@@ -31,6 +31,7 @@ When replaying, ERM loads the in-memory storage from the filesystem storage at s
 - The filesystem storage does not depend on a file format. Each Cargo feature compiles in one format, and ERM's configuration selects the format that the filesystem storage reads and writes.
 - File names are valid and distinct on Linux, macOS, and Windows.
 - All exchanges fit in memory.
+- When recording, the directory is on a local, writable filesystem.
 - All storage code lives in one Rust module. The module exposes only the `Recorder` and `Replayer` traits, one constructor for each, and the types in their signatures.
 
 ## 3. Context and scope
@@ -46,11 +47,11 @@ When replaying, ERM loads the in-memory storage from the filesystem storage at s
 
 | Problem | Approach |
 |---|---|
-| A read and a write of one `id` race. | Two modes. Recording only writes, and Replaying only reads. |
+| A read and a write of one `id` race. | Two modes. Recording only writes, and Replaying only reads. A mode that does both would need a per-`id` lock held across the upstream call. |
 | Concurrent writes to the filesystem. | One writer thread receives exchanges over a channel and writes them in order. |
 | A crash leaves a partial file. | Write to a temporary file, then rename it into place. |
 | `find` must not touch the disk. | At startup, Replaying loads every exchange into an in-memory map keyed by `id`. |
-| File names must be valid on all platforms. | The `Id` type validates the `x-erm-match` value, and the file name is `<id>.<ext>`. |
+| File names must be valid on all platforms. | The `Id` type validates the `x-erm-match` value, and the file name is `<id>.<ext>`. Rewriting invalid values instead could map two `id`s to one file. |
 | The format must be replaceable. | Cargo features compile in formats, and the configuration selects one. |
 | The rest of ERM must not depend on storage internals. | One module exposes only the traits, their constructors, and the types in their signatures. |
 | Bad state must not go unnoticed. | ERM exits with an error on a failed write or a corrupted file. |
