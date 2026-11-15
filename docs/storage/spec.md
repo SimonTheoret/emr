@@ -114,3 +114,18 @@ If writing an exchange fails, ERM prints an error that names the file and the ca
 ### Corrupted files while replaying
 
 A file is corrupted if it does not parse in the selected format, or if its name does not match the `id` it contains. At startup, ERM checks every file, prints each corrupted file with the cause, then exits with a non-zero status before it accepts connections.
+
+## 10. Quality requirements
+
+Every scenario passes on Linux, macOS, and Windows, with every compiled-in format.
+
+| ID | Goal | Stimulus | Expected response |
+|---|---|---|---|
+| Q1 | Correctness | Save an exchange with binary body frames, repeated headers, and non-zero delays. Restart in Replaying mode and call `find` with its `id`. | The returned exchange equals the saved one in every field. |
+| Q2 | Correctness | Save the same `id` twice, then restart in Replaying mode. | One file holds the `id`, and `find` returns the second exchange. |
+| Q3 | Correctness | Leave `login.<ext>.tmp` next to a valid `login.<ext>`, as an interrupted write would. Start in Replaying mode. | ERM starts, and `find` returns the exchange in `login.<ext>`. |
+| Q4 | Correctness | Truncate one file and rename another to a different valid `id`. Start in Replaying mode. | ERM lists both files with their causes and exits with a non-zero status. |
+| Q5 | Correctness | Make the directory read-only while recording, then send a request. | ERM names the file and the cause, and exits with a non-zero status. |
+| Q6 | Correctness | Send Ctrl-C while exchanges are queued. | Every queued exchange is on disk before ERM exits. |
+| Q7 | Correctness | Call `Id::parse` with an uppercase letter, a `/`, `con`, an empty string, and 201 characters. | Each call returns an error. |
+| Q8 | Encapsulation | Change the selected format in the configuration, or build with a different set of format features. | No code outside the storage module changes. |
