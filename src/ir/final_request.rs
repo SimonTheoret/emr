@@ -1,21 +1,9 @@
-use uuid::Uuid;
-
-use super::{ERMRequestParts, HeadersIR, TimedFrame};
+use super::{ERMRequestParts, TimedFrame};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FinalRequest {
     pub parts: ERMRequestParts,
     pub body: Vec<TimedFrame>,
-}
-
-impl FinalRequest {
-    pub fn headers(&self) -> &HeadersIR {
-        &self.parts.headers
-    }
-
-    pub fn id(&self) -> &Uuid {
-        &self.parts.id
-    }
 }
 
 #[cfg(test)]
