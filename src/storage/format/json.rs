@@ -507,10 +507,23 @@ mod tests {
         String::from_utf8(Json.serialize(&login_exchange()).unwrap()).unwrap()
     }
 
+    fn has_number_array(value: &Value) -> bool {
+        match value {
+            Value::Array(items) => {
+                (!items.is_empty() && items.iter().all(Value::is_number))
+                    || items.iter().any(has_number_array)
+            }
+            Value::Object(fields) => fields.values().any(has_number_array),
+            _ => false,
+        }
+    }
+
     proptest! {
         #[test]
         fn exchanges_round_trip(exchange in exchange_strategy()) {
             let bytes = Json.serialize(&exchange).unwrap();
+            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            prop_assert!(!has_number_array(&value), "no byte sequence is a JSON number array: {value}");
             prop_assert_eq!(Json.deserialize(&bytes).unwrap(), exchange);
         }
     }
