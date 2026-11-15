@@ -96,6 +96,8 @@ jobs:
       - *devshell-cache
       - *cargo-cache
       - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo test --all-features
+      # Storage spec Q8: a different set of format features builds with no change outside storage.
+      - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo test --no-default-features --features json
 
   # The storage spec requires every scenario to pass on Linux, macOS, and Windows.
   test-other-os:
