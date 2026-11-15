@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use eyre::{Result, bail};
 use std::path::PathBuf;
 use url::Url;
@@ -7,9 +7,28 @@ use crate::ir::UrlIR;
 
 #[derive(Debug, Parser)]
 #[command(version="0.1.0", about= "Record and replay proxy", long_about = None)]
-pub struct Args {
-    #[arg(long , short, value_parser = parse_destination)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub mode: Mode,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Mode {
+    /// Proxy every request to the destination and record each exchange.
+    Record(RecordArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct RecordArgs {
+    #[arg(long, short, value_parser = parse_destination)]
     pub destination: UrlIR,
+    #[command(flatten)]
+    pub serve: ServeArgs,
+}
+
+/// Where the exchanges live, and the port.
+#[derive(Debug, Args)]
+pub struct ServeArgs {
     #[arg(short, long, default_value = "mocks")]
     pub mock_dir: PathBuf,
     #[arg(short, default_value = "4321")]
