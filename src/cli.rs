@@ -3,7 +3,7 @@ use eyre::{Result, bail};
 use std::path::PathBuf;
 use url::Url;
 
-use crate::ir::UrlIR;
+use crate::{ir::UrlIR, storage::FormatKind};
 
 #[derive(Debug, Parser)]
 #[command(version="0.1.0", about= "Record and replay proxy", long_about = None)]
@@ -26,11 +26,16 @@ pub struct RecordArgs {
     pub serve: ServeArgs,
 }
 
-/// Where the exchanges live, and the port.
+/// Where the exchanges live, their format, and the port.
 #[derive(Debug, Args)]
 pub struct ServeArgs {
     #[arg(short, long, default_value = "mocks")]
     pub mock_dir: PathBuf,
+    /// The file format of the recorded exchanges.
+    // Without the `ron` feature there is no default, so the flag is required.
+    #[arg(long)]
+    #[cfg_attr(feature = "ron", arg(default_value = "ron"))]
+    pub format: FormatKind,
     #[arg(short, default_value = "4321")]
     pub port: u16,
 }

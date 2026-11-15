@@ -1,6 +1,7 @@
 mod capture;
 
 use axum::{
+    Router,
     body::Body,
     extract::{Request, State},
     response::{IntoResponse, Response},
@@ -9,7 +10,27 @@ use http::{StatusCode, request};
 use reqwest::Client;
 
 use self::capture::{Saver, Tap};
-use crate::{ir::UrlIR, match_id::MatchId, proxy};
+use crate::{cli::RecordArgs, ir::UrlIR, match_id::MatchId, proxy, server, storage};
+
+/// Proxies to `args.destination` and records every complete exchange until shutdown.
+pub async fn run(args: RecordArgs) -> eyre::Result<()> {
+    let client = client()?;
+    let (recorder, writer) = storage::recorder(&args.serve.mock_dir, args.serve.format)?;
+    let (saver, drained) = Saver::new(recorder);
+    let state = Recording {
+        saver,
+        client,
+        destination: args.destination,
+    };
+    let served = server::serve(
+        args.serve.port,
+        Router::new().fallback(record).with_state(state),
+    )
+    .await;
+    drained.wait().await;
+    writer.finish();
+    Ok(served?)
+}
 
 /// The client that forwards each request to the upstream.
 fn client() -> reqwest::Result<Client> {
@@ -89,7 +110,6 @@ mod tests {
     };
 
     use axum::{
-        Router,
         response::AppendHeaders,
         routing::{any, get},
     };
