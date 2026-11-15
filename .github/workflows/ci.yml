@@ -5,6 +5,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  merge_group:
   schedule:
     - cron: "0 12 * * 1"
   workflow_dispatch:
@@ -59,6 +60,10 @@ jobs:
       - *devshell-cache
       - name: Lint GitHub Actions workflows
         run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command actionlint -color
+      - name: Verify CI acceptance coverage and rejection cases
+        run: |
+          python3 scripts/check_ci_gate.py
+          python3 -m unittest discover -s scripts -p 'test_check_ci_gate.py'
 
   clippy:
     name: cargo clippy
@@ -288,3 +293,16 @@ jobs:
   #     - name: Show warning
   #       if: failure()
   #       run: echo "::warning title=Nix dependencies check failed::Nix flake inputs are outdated or the check could not run; see the job log."
+
+  acceptance:
+    name: CI acceptance
+    if: always()
+    needs: [fmt, actionlint, clippy, test, windows-build, macos-build, package, integration, docker-image, image-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - *checkout
+      - name: Require every CI job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/check_ci_gate.py --results
