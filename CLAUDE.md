@@ -48,7 +48,9 @@ recorded pacing and never contacts an upstream. `docs/storage/spec.md` is the st
   wraps both bodies in a `Tap` that records each frame with its delay and hands the frames over
   only if the body ended. One task per exchange joins both taps and calls `Recorder::save`. An
   upstream error, a body error, or a client that leaves early saves nothing; a failed connection is
-  `502`. Redirects are passed through, not followed. `run` waits for every `Saver` (`Drained`)
+  `502`. ERM never follows a redirect. `proxy::client_location` turns a `Location` inside the
+  destination into a path on ERM, so the client follows it through ERM, and a `Location` outside
+  it is `502`. `run` waits for every `Saver` (`Drained`)
   before `Writer::finish`, so no save is lost at shutdown.
 - `src/replay.rs` answers with `Replayer::find`, `404` on a miss, waiting each frame's `tslf`.
 - `src/proxy.rs` builds the upstream URL, strips hop-by-hop headers, and builds the client
@@ -77,5 +79,7 @@ recorded pacing and never contacts an upstream. `docs/storage/spec.md` is the st
 - `HeadersIR` keeps repeated headers in order. It relies on the `http::HeaderMap` iterator
   invariant that a `None` name means "same name as the previous value".
 - Run one ERM process per mock directory: two recorders write the same `<id>.<ext>.tmp`.
+- A client that follows a redirect sends the same `x-erm-match` again, so the next hop replaces
+  the `3xx` exchange, and replay answers the first request with the last hop.
 - `erm-diagram.drawio` / `.jpg` at the repo root is the architecture diagram; `.drawio.bkp` and
   `.drawio.dtmp` files are Draw.io backups and are gitignored.
