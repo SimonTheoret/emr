@@ -83,12 +83,10 @@ fn report_and_exit(error: WriteError) {
 fn write_exchange(dir: &Path, format: &dyn Format, exchange: &Exchange) -> Result<(), WriteError> {
     let name = format!("{}.{}", exchange.id, format.extension());
     let path = dir.join(&name);
-    let bytes = format
-        .serialize(exchange)
-        .map_err(|cause| WriteError::Serialize {
-            path: path.clone(),
-            cause,
-        })?;
+    let bytes = serialize(format, exchange).map_err(|cause| WriteError::Serialize {
+        path: path.clone(),
+        cause,
+    })?;
     let tmp = dir.join(format!("{name}.tmp"));
     fs::write(&tmp, bytes).map_err(|cause| WriteError::Write {
         path: tmp.clone(),
@@ -99,6 +97,21 @@ fn write_exchange(dir: &Path, format: &dyn Format, exchange: &Exchange) -> Resul
         to: path,
         cause,
     })
+}
+
+/// Turns a panic in the format into an error, so the writer reaches the failure path instead of
+/// dying and leaving ERM proxying without recording.
+fn serialize(format: &dyn Format, exchange: &Exchange) -> eyre::Result<Vec<u8>> {
+    panic::catch_unwind(panic::AssertUnwindSafe(|| format.serialize(exchange))).unwrap_or_else(
+        |payload| {
+            let message = payload
+                .downcast_ref::<&str>()
+                .map(|text| text.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "no message".to_owned());
+            Err(eyre::eyre!("the format panicked: {message}"))
+        },
+    )
 }
 
 #[derive(Debug)]
@@ -144,49 +157,66 @@ mod tests {
     use std::{env, process::Command, time::Duration};
 
     use bytes::Bytes;
-    use http::StatusCode;
+    use proptest::{
+        strategy::{Strategy, ValueTree},
+        test_runner::TestRunner,
+    };
     use tempfile::TempDir;
-    use uuid::Uuid;
 
     use super::*;
     use crate::{
-        ir::{
-            ERMRequestParts, ERMResponseParts, FinalRequest, FinalResponse, HeadersIR, MethodIR,
-            StatusCodeIR, TimedFrame, VersionIR,
-        },
-        storage::Id,
+        ir::TimedFrame,
+        storage::{Id, exchange::tests::exchange_strategy},
     };
 
     const EXIT_TEST: &str = "storage::recorder::tests::a_failed_write_exits_with_status_1";
     const EXIT_TEST_DIR: &str = "ERM_RECORDER_EXIT_TEST_DIR";
 
     fn exchange(id: &str, body: &str) -> Exchange {
-        Exchange {
-            id: Id::parse(id.as_bytes()).unwrap(),
-            request: FinalRequest {
-                parts: ERMRequestParts {
-                    method: MethodIR::Get,
-                    version: VersionIR::Http11,
-                    headers: HeadersIR(Vec::new()),
-                    uri: "/login".parse().unwrap(),
-                    id: Uuid::nil(),
-                },
-                body: Vec::new(),
-            },
-            response: FinalResponse {
-                parts: ERMResponseParts {
-                    url: "http://upstream.test/login".parse().unwrap(),
-                    version: VersionIR::Http11,
-                    headers: HeadersIR(Vec::new()),
-                    status: StatusCodeIR::from(StatusCode::OK),
-                    id: Uuid::nil(),
-                },
-                body: vec![TimedFrame {
-                    content: Bytes::copy_from_slice(body.as_bytes()),
-                    tslf: Duration::from_millis(5),
-                }],
-            },
+        let mut exchange = exchange_strategy()
+            .new_tree(&mut TestRunner::deterministic())
+            .unwrap()
+            .current();
+        exchange.id = Id::parse(id.as_bytes()).unwrap();
+        exchange.response.body = vec![TimedFrame {
+            content: Bytes::copy_from_slice(body.as_bytes()),
+            tslf: Duration::from_millis(5),
+        }];
+        exchange
+    }
+
+    struct PanickingFormat;
+
+    impl Format for PanickingFormat {
+        fn extension(&self) -> &'static str {
+            "ron"
         }
+
+        fn serialize(&self, _exchange: &Exchange) -> eyre::Result<Vec<u8>> {
+            panic!("boom")
+        }
+
+        fn deserialize(&self, _bytes: &[u8]) -> eyre::Result<Exchange> {
+            unreachable!("the writer never deserializes")
+        }
+    }
+
+    #[test]
+    fn a_panicking_format_becomes_a_serialize_error() {
+        let dir = TempDir::new().unwrap();
+
+        let error = write_exchange(dir.path(), &PanickingFormat, &exchange("login", "body"))
+            .expect_err("a panic in the format is an error");
+
+        assert!(
+            matches!(&error, WriteError::Serialize { path, .. } if path == &dir.path().join("login.ron")),
+            "the error names login.ron: {error}"
+        );
+        assert!(
+            error.to_string().contains("boom"),
+            "the error carries the panic message: {error}"
+        );
+        assert!(file_names(dir.path()).is_empty(), "nothing is written");
     }
 
     fn file_names(dir: &Path) -> Vec<String> {
