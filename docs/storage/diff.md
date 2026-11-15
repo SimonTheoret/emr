@@ -41,3 +41,8 @@ Differences between the code and [the storage spec](spec.md). Delete an entry wh
 - **Filesystem errors.** `serialize_request` and `serialize_response` return errors from detached tasks, so write failures are silently dropped and ERM keeps proxying.
 - **Duplicate ids.** Several files can carry the same `x-erm-match` value, and `match_by_header` returns whichever one `HashMap` iteration yields first. In the spec, the file name is the `id`, so two exchanges can't share one.
 - **Corrupted files.** `MockFileStorage::load_all_files` stops at the first file that fails to parse, and `main` panics on it through `expect`. A corrupted file that the watcher picks up later makes `handle_request` panic.
+
+## 10. Quality requirements
+
+- **Q1.** Partly covered. Proptests in `src/ir/mock.rs` round-trip `Mock` through RON in memory, without a file or a restart.
+- **Q2 to Q8.** No tests.
