@@ -13,11 +13,28 @@ pub async fn serve(port: u16, router: Router) -> io::Result<()> {
 }
 
 async fn shutdown_signal() {
-    // TODO: resolve when the first of these resolves:
-    //   tokio::signal::ctrl_c()
-    //   #[cfg(unix)] tokio::signal::unix::signal(SignalKind::terminate()), then `.recv()`
-    //   #[cfg(not(unix))] std::future::pending::<()>()
-    // If a handler fails to install, log it and let that branch pend forever. Resolving
-    // instead would stop the server the moment it starts.
-    todo!("wait for Ctrl-C or SIGTERM")
+    let interrupt = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            tracing::error!(%error, "could not install Ctrl-C handler");
+            std::future::pending::<()>().await;
+        }
+    };
+    let terminate = async {
+        #[cfg(unix)]
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                tracing::error!(%error, "could not install SIGTERM handler");
+                std::future::pending::<()>().await;
+            }
+        }
+        #[cfg(not(unix))]
+        std::future::pending::<()>().await;
+    };
+    tokio::select! {
+        () = interrupt => {},
+        () = terminate => {},
+    }
 }
