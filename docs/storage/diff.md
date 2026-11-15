@@ -31,7 +31,7 @@ Differences between the code and [the storage spec](spec.md). Delete an entry wh
 
 ## 6. Runtime view
 
-- **Startup.** `MockFileStorage::new` creates a missing directory in every run. `load_all_files` walks subdirectories recursively, skips dot-prefixed paths, and loads nothing when the directory itself is dot-prefixed. It logs no warning for an empty directory.
+- **Startup.** `MockFileStorage::new` creates a missing directory in every run. `load_all_files` skips dot-prefixed paths, so it loads nothing when the directory itself is dot-prefixed. It logs no warning for an empty directory.
 - **Shutdown.** `main` calls `axum::serve` without graceful shutdown. Serializer tasks are detached, so exchanges still being written at exit are lost.
 
 ## 8. Cross-cutting concepts
@@ -39,4 +39,5 @@ Differences between the code and [the storage spec](spec.md). Delete an entry wh
 - **File names.** The code names files `request_<uuid>.ron` and `response_<uuid>.ron`. There is no `Id` type, and `x-erm-match` values are not validated.
 - **Atomic writes.** `serialize_request` and `serialize_response` call `std::fs::write` on the final path, so a crash can leave a partial file.
 - **Filesystem errors.** `serialize_request` and `serialize_response` return errors from detached tasks, so write failures are silently dropped and ERM keeps proxying.
+- **Duplicate ids.** Startup does not check for duplicates. When several recorded requests share an `x-erm-match` value, `match_by_header` returns whichever one `HashMap` iteration yields first.
 - **Corrupted files.** `MockFileStorage::load_all_files` stops at the first file that fails to parse, and `main` panics on it through `expect`. A corrupted file that the watcher picks up later makes `handle_request` panic.
