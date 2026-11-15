@@ -12,7 +12,7 @@ ERM runs in one of two modes. Each mode uses one storage trait:
 
 | Mode | Trait | Operation | Behavior |
 |---|---|---|---|
-| Recording | `Recorder` | `save(exchange) -> Result<()>` | Queues the exchange for the filesystem storage and returns. Replaces any earlier exchange with the same `id`. |
+| Recording | `Recorder` | `save(exchange)` | Queues the exchange for the filesystem storage and returns. Replaces any earlier exchange with the same `id`. |
 | Replaying | `Replayer` | `find(id) -> Option<&Exchange>` | Returns the exchange with this `id` from the in-memory storage, or `None` if there is none. |
 
 When replaying, ERM loads the in-memory storage from the filesystem storage at startup.
