@@ -430,6 +430,7 @@ name = "erm"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "bytes",
  "clap",
  "dir_walker",
@@ -444,6 +445,7 @@ dependencies = [
  "reqwest",
  "ron",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tower",
