@@ -20,8 +20,11 @@ use tokio::{
 
 mod cli;
 mod ir;
+mod legacy_storage;
 pub mod matching;
 mod proxy;
+// The record and replay modes start using it later in this stack.
+#[allow(dead_code, unused_imports)]
 mod storage;
 use crate::{
     cli::Args,
@@ -29,8 +32,8 @@ use crate::{
         BodyStream, ERMRequest, ERMRequestParts, ERMResponse, ERMResponseParts, FinalRequest,
         FinalResponse, HeadersIR, Mock, StatusCodeIR, TimedFrame, UrlIR, VersionIR,
     },
+    legacy_storage::MockFileStorage,
     proxy::{sanitize_headers, upstream_url},
-    storage::MockFileStorage,
 };
 
 const SERIALIZATION_EXTENSION: &str = "ron";
