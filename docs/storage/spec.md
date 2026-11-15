@@ -40,7 +40,7 @@ When replaying, ERM loads the in-memory storage from the filesystem storage at s
 | Request handler, Recording mode | Proxies the request to the upstream, then calls `Recorder::save` with the complete exchange. |
 | Request handler, Replaying mode | Calls `Replayer::find` with the request's `id`. |
 | ERM startup | Reads the configuration (directory, format, and mode) and calls the constructor for the selected mode. |
-| Filesystem | Holds one file per exchange in the configured directory or its subdirectories. |
+| Filesystem | Holds one file per exchange in the configured directory. |
 
 ## 4. Solution strategy
 
@@ -53,16 +53,16 @@ When replaying, ERM loads the in-memory storage from the filesystem storage at s
 | File names must be valid on all platforms. | The `Id` type validates the `x-erm-match` value, and the file name is `<id>.<ext>`. |
 | The format must be replaceable. | Cargo features compile in formats, and the configuration selects one. |
 | The rest of ERM must not depend on storage internals. | One module exposes only the traits, their constructors, and the types in their signatures. |
-| Bad state must not go unnoticed. | ERM exits with an error on a failed write, a corrupted file, or a duplicate `id`. |
+| Bad state must not go unnoticed. | ERM exits with an error on a failed write or a corrupted file. |
 
 ## 5. Building block view
 
 | Block | Responsibility |
 |---|---|
 | `Id`, `Exchange` | Public types. `Id::parse` validates an `x-erm-match` value. |
-| `Recorder` trait, filesystem recorder | Keeps a map from each `id` to its file path. Sends each exchange over a channel to one writer thread, which writes the temporary file and renames it. |
+| `Recorder` trait, filesystem recorder | Sends each exchange over a channel to one writer thread, which writes the temporary file and renames it. |
 | `Replayer` trait, in-memory replayer | A `HashMap<Id, Exchange>`, filled once at startup. Nothing writes to it afterward, so it needs no lock. |
-| Loader | Reads the directory recursively, parses every file, checks that each file name matches its `id`, and reports every corrupted file and duplicate `id`. |
+| Loader | Reads the directory, parses every file, checks that each file name matches its `id`, and reports every corrupted file. |
 | `Format`, private trait | Serializes and deserializes an exchange and names its extension. Each Cargo feature adds one implementation. |
 
 ## 6. Runtime view
@@ -71,15 +71,15 @@ When replaying, ERM loads the in-memory storage from the filesystem storage at s
 
 | Mode | Steps |
 |---|---|
-| Recording | Creates the directory if it is missing. Maps each `id` to its file path from the file names, then starts the writer thread. |
-| Replaying | Loads every `<id>.<ext>` file into the in-memory storage. If the directory is missing or holds no exchanges, logs a warning and starts with no exchanges. |
+| Recording | Creates the directory if it is missing, then starts the writer thread. |
+| Replaying | Loads every `<id>.<ext>` file at the top level of the directory into the in-memory storage. If the directory is missing or holds no exchanges, logs a warning and starts with no exchanges. |
 
-Both modes search the directory recursively. They ignore `.tmp` files and files with another extension.
+Both modes ignore subdirectories, `.tmp` files, and files with another extension.
 
 ### Saving an exchange
 
 1. The request handler calls `save`, which queues the exchange and returns.
-2. The writer thread takes the next exchange, writes `<id>.<ext>.tmp`, and renames it to `<id>.<ext>`. The file goes next to the existing file for that `id`, or at the top level of the directory for a new `id`.
+2. The writer thread takes the next exchange, writes `<id>.<ext>.tmp`, and renames it to `<id>.<ext>`.
 3. If the write fails, ERM exits. See [Filesystem errors while recording](#filesystem-errors-while-recording).
 
 ### Shutdown
@@ -90,7 +90,7 @@ On Ctrl-C, or SIGTERM on Linux and macOS, ERM stops accepting connections, finis
 
 ### File names
 
-The filesystem storage writes each exchange to `<id>.<ext>`, where `<ext>` is the selected format's extension. Saving an `id` again replaces its file, in whichever subdirectory it is.
+The filesystem storage writes each exchange to `<id>.<ext>`, where `<ext>` is the selected format's extension. Saving an `id` again replaces its file.
 
 The `Id` type accepts a value only if it:
 
@@ -113,7 +113,3 @@ If writing an exchange fails, ERM prints an error that names the file and the ca
 ### Corrupted files while replaying
 
 A file is corrupted if it does not parse in the selected format, or if its name does not match the `id` it contains. At startup, ERM checks every file, prints each corrupted file with the cause, then exits with a non-zero status before it accepts connections.
-
-### Duplicate ids
-
-If two files in the directory or its subdirectories have the same `id`, ERM prints both paths and exits with a non-zero status at startup. This applies in both modes.
