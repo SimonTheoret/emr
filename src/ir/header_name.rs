@@ -50,10 +50,15 @@ pub(crate) mod tests {
 
     use super::*;
 
+    const TOKEN: &[u8] =
+        b"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+    /// Names that `http::HeaderName` accepts: one or more RFC 9110 token characters, in any
+    /// case, since `new` lowercases them.
     pub(crate) fn header_name_strategy() -> impl Strategy<Value = HeaderNameIR> {
-        prop::collection::vec(0_u8..=127, 0..64)
-            .prop_map(Bytes::from)
-            .prop_map(HeaderNameIR::new)
+        // A character table, not a regex: storage tests build this strategy once per exchange.
+        prop::collection::vec(prop::sample::select(TOKEN), 1..64)
+            .prop_map(|name| HeaderNameIR::new(Bytes::from(name)))
     }
 
     #[test]
@@ -118,6 +123,7 @@ pub(crate) mod tests {
         assert_ne!(name, Bytes::from_static(b"x-other"));
     }
 
+    #[cfg(feature = "ron")]
     #[test]
     fn serialization_uses_the_normalized_bytes() {
         let name = HeaderNameIR::new(Bytes::from_static(b"X-Test"));
@@ -128,6 +134,7 @@ pub(crate) mod tests {
         assert_eq!(bytes, Bytes::from_static(b"x-test"));
     }
 
+    #[cfg(feature = "ron")]
     #[test]
     fn deserialization_normalizes_ascii_case() {
         let serialized = ron::to_string(&Bytes::from_static(b"X-TEST")).unwrap();
@@ -137,6 +144,7 @@ pub(crate) mod tests {
         assert_eq!(name, Bytes::from_static(b"x-test"));
     }
 
+    #[cfg(feature = "ron")]
     proptest! {
         #[test]
         fn normalized_ascii_name_round_trips_through_ron(name in header_name_strategy()) {

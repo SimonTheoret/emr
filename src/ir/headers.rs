@@ -1,11 +1,36 @@
 use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 
 use super::{HeaderNameIR, HeaderValueIR};
 
+/// Headers in their recorded order, repeated names included.
+///
+/// Deserializing rejects any pair that `HeaderMap` would reject, so a hand-edited file with
+/// an invalid name or value is a corrupted file, not a replay panic.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-pub struct HeadersIR(pub Vec<(HeaderNameIR, HeaderValueIR)>);
+pub struct HeadersIR(
+    #[serde(deserialize_with = "deserialize_valid")] pub Vec<(HeaderNameIR, HeaderValueIR)>,
+);
+
+fn deserialize_valid<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<(HeaderNameIR, HeaderValueIR)>, D::Error> {
+    let headers = Vec::<(HeaderNameIR, HeaderValueIR)>::deserialize(deserializer)?;
+    for (name, value) in &headers {
+        parse(name, value).map_err(D::Error::custom)?;
+    }
+    Ok(headers)
+}
+
+fn parse(name: &HeaderNameIR, value: &HeaderValueIR) -> Result<(HeaderName, HeaderValue), String> {
+    let name = Bytes::from(name.clone());
+    let name =
+        HeaderName::from_bytes(&name).map_err(|_| format!("invalid header name {name:?}"))?;
+    let value = HeaderValue::from_bytes(value)
+        .map_err(|_| format!("invalid value {value:?} for header {name}"))?;
+    Ok((name, value))
+}
 
 impl From<HeaderMap> for HeadersIR {
     fn from(value: HeaderMap) -> Self {
@@ -30,12 +55,11 @@ impl From<HeaderMap> for HeadersIR {
 
 impl From<HeadersIR> for HeaderMap {
     fn from(value: HeadersIR) -> Self {
-        let mut map = Self::with_capacity(1 << 5);
+        let mut map = Self::with_capacity(value.0.len());
 
-        for (name, value) in value.0 {
-            let name_bytes: Bytes = name.into();
-            let name = HeaderName::from_bytes(&name_bytes).unwrap();
-            let value = HeaderValue::from_bytes(&value).unwrap();
+        for (name, value) in &value.0 {
+            let (name, value) = parse(name, value)
+                .expect("a HeadersIR comes from a HeaderMap or from a validated file");
             map.append(name, value);
         }
 
