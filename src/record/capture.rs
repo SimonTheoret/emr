@@ -17,7 +17,6 @@ use futures::future::try_join;
 use http::request;
 use http_body::{Body, Frame, SizeHint};
 use tokio::sync::{mpsc, oneshot};
-use uuid::Uuid;
 
 use crate::{
     ir::{ERMRequestParts, ERMResponseParts, FinalRequest, FinalResponse, TimedFrame, UrlIR},
@@ -105,7 +104,6 @@ impl Capture {
             version: head.version.into(),
             headers: head.headers.clone().into(),
             status: head.status.into(),
-            id: Uuid::nil(),
         };
         let (body, response_body) = Tap::new(body);
         let Self {

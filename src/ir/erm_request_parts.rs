@@ -1,5 +1,4 @@
 use http::request::Parts;
-use uuid::Uuid;
 
 use super::{HeadersIR, MethodIR, UriIR, VersionIR};
 
@@ -9,7 +8,6 @@ pub struct ERMRequestParts {
     pub version: VersionIR,
     pub headers: HeadersIR,
     pub uri: UriIR,
-    pub id: Uuid,
 }
 
 /// Records the request as it arrived, before `sanitize_headers` touches the forwarded copy.
@@ -20,8 +18,6 @@ impl From<&Parts> for ERMRequestParts {
             version: parts.version.into(),
             headers: parts.headers.clone().into(),
             uri: parts.uri.clone().into(),
-            // The record mode has no use for the old recorder's UUID, which goes away with it.
-            id: Uuid::nil(),
         }
     }
 }
@@ -43,14 +39,12 @@ pub(crate) mod tests {
             version_strategy(),
             headers_strategy(),
             uri_strategy(),
-            any::<u128>().prop_map(Uuid::from_u128),
         )
-            .prop_map(|(method, version, headers, uri, id)| ERMRequestParts {
+            .prop_map(|(method, version, headers, uri)| ERMRequestParts {
                 method,
                 version,
                 headers,
                 uri,
-                id,
             })
     }
 

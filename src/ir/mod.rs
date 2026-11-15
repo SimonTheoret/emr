@@ -1,11 +1,4 @@
-// The old recorder's types, deleted by the next change.
-#[allow(dead_code)]
-mod body_stream;
-#[allow(dead_code)]
-mod erm_request;
 mod erm_request_parts;
-#[allow(dead_code)]
-mod erm_response;
 mod erm_response_parts;
 mod final_request;
 mod final_response;
@@ -19,13 +12,7 @@ mod uri;
 mod url;
 mod version;
 
-#[allow(unused_imports)]
-pub use body_stream::BodyStream;
-#[allow(unused_imports)]
-pub use erm_request::ERMRequest;
 pub use erm_request_parts::ERMRequestParts;
-#[allow(unused_imports)]
-pub use erm_response::ERMResponse;
 pub use erm_response_parts::ERMResponseParts;
 pub use final_request::FinalRequest;
 pub use final_response::FinalResponse;
