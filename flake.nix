@@ -125,6 +125,30 @@
           };
 
           apps = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            integration-explore = {
+              type = "app";
+              program =
+                let
+                  test = import ./tests/integration {
+                    inherit pkgs;
+                    erm = ermPackage;
+                    explore = true;
+                  };
+                in
+                "${test.driverInteractive}/bin/nixos-test-driver";
+            };
+            integration-static-explore = {
+              type = "app";
+              program =
+                let
+                  test = import ./tests/integration {
+                    inherit pkgs;
+                    erm = ermPackageStatic;
+                    explore = true;
+                  };
+                in
+                "${test.driverInteractive}/bin/nixos-test-driver";
+            };
             integration = {
               type = "app";
               program = "${integrationTest.driverInteractive}/bin/nixos-test-driver";

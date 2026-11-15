@@ -1,4 +1,8 @@
-{ pkgs, erm }:
+{
+  pkgs,
+  erm,
+  explore ? false,
+}:
 
 let
   lib = pkgs.lib;
@@ -150,11 +154,21 @@ pkgs.testers.runNixOSTest {
     proxy.wait_for_open_port(${toString ermHttpPort})
     proxy.wait_for_open_port(${toString ermHttpsPort})
 
-    # Random requests through both proxies, compared against go-httpbin's echo.
-    proxy.succeed(
+    echo_command = (
         "python3 ${./echo.py} "
         "--pair http://127.0.0.1:${toString ermHttpPort} http://upstream:${toString upstreamHttpPort} "
         "--pair http://127.0.0.1:${toString ermHttpsPort} https://upstream:${toString upstreamHttpsPort}"
     )
+    ${
+      if explore then
+        ''
+          proxy.succeed(echo_command)
+        ''
+      else
+        ''
+          for seed in [0, 4294967295]:
+              proxy.succeed(f"{echo_command} --seed {seed} --count 100")
+        ''
+    }
   '';
 }

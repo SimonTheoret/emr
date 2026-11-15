@@ -220,6 +220,11 @@ jobs:
       - *install-nix
       - *package-cache
       - run: nix build --no-link --print-build-logs .#checks.${{ matrix.system }}.${{ matrix.check }}
+      - name: Explore random echo cases
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          EXPLORE_APP: .#apps.${{ matrix.system }}.${{ matrix.check }}-explore
+        run: nix run "$EXPLORE_APP" -- --no-interactive
 
   docker-image:
     name: docker image (${{ matrix.system }})
