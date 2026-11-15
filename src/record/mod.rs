@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use http::{StatusCode, request};
-use reqwest::Client;
+use reqwest::{Client, redirect};
 
 use self::capture::{Saver, Tap};
 use crate::{cli::RecordArgs, ir::UrlIR, match_id::MatchId, proxy, server, storage};
@@ -32,8 +32,14 @@ pub async fn run(args: RecordArgs) -> eyre::Result<()> {
     Ok(served?)
 }
 
+/// Sends each request once. A redirect goes back to the client unfollowed, so the recording
+/// holds the response the client saw.
 fn client() -> reqwest::Result<Client> {
-    Client::builder().use_rustls_tls().user_agent("erm").build()
+    Client::builder()
+        .use_rustls_tls()
+        .user_agent("erm")
+        .redirect(redirect::Policy::none())
+        .build()
 }
 
 /// Everything record mode's handler can reach. Replay mode never builds one, so no
@@ -110,7 +116,7 @@ mod tests {
 
     use axum::{
         response::AppendHeaders,
-        routing::{any, get},
+        routing::{any, get, post},
     };
     use bytes::Bytes;
     use futures::{StreamExt, stream};
@@ -200,7 +206,11 @@ mod tests {
                 .route("/frames", any(frames))
                 .route("/fails", get(fails))
                 .route("/hangs", get(hangs))
-                .route("/no-content", get(|| async { StatusCode::NO_CONTENT })),
+                .route("/no-content", get(|| async { StatusCode::NO_CONTENT }))
+                .route(
+                    "/redirect",
+                    post(|| async { (StatusCode::SEE_OTHER, [(header::LOCATION, "/frames")]) }),
+                ),
         )
         .await
     }
@@ -239,7 +249,7 @@ mod tests {
     /// A client that shows each response as ERM sent it, without following redirects.
     fn caller() -> Client {
         Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
+            .redirect(redirect::Policy::none())
             .build()
             .unwrap()
     }
@@ -359,6 +369,27 @@ mod tests {
             .map(|exchange| exchange.response.parts.status.into())
             .collect();
         assert_eq!(statuses, [StatusCode::OK, StatusCode::NO_CONTENT]);
+    }
+
+    #[tokio::test]
+    async fn a_redirect_reaches_the_caller_and_is_saved_unfollowed() {
+        let upstream = upstream().await;
+        let (recorder, receiver) = saves();
+        let proxy = Proxy::start(&upstream.url, recorder).await;
+
+        let response = send(Method::POST, proxy.url("/redirect"), "redirect").await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.headers()[header::LOCATION], "/frames");
+        response.bytes().await.unwrap();
+        proxy.stop().await;
+
+        let exchanges = saved(receiver);
+        assert_eq!(ids(&exchanges), ["redirect"]);
+        assert_eq!(
+            StatusCode::from(exchanges[0].response.parts.status),
+            StatusCode::SEE_OTHER,
+            "the saved response is the redirect"
+        );
     }
 
     #[tokio::test]
