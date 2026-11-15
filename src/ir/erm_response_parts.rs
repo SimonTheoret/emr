@@ -1,5 +1,3 @@
-use uuid::Uuid;
-
 use super::{HeadersIR, StatusCodeIR, UrlIR, VersionIR};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -8,7 +6,6 @@ pub struct ERMResponseParts {
     pub version: VersionIR,
     pub headers: HeadersIR,
     pub status: StatusCodeIR,
-    pub id: Uuid,
 }
 
 #[cfg(test)]
@@ -27,14 +24,12 @@ pub(crate) mod tests {
             version_strategy(),
             headers_strategy(),
             status_code_strategy(),
-            any::<u128>().prop_map(Uuid::from_u128),
         )
-            .prop_map(|(url, version, headers, status, id)| ERMResponseParts {
+            .prop_map(|(url, version, headers, status)| ERMResponseParts {
                 url,
                 version,
                 headers,
                 status,
-                id,
             })
     }
 }
