@@ -8,11 +8,28 @@ impl Format for Ron {
         "ron"
     }
 
-    fn serialize(&self, _exchange: &Exchange) -> eyre::Result<Vec<u8>> {
-        todo!("RON serialization")
+    fn serialize(&self, exchange: &Exchange) -> eyre::Result<Vec<u8>> {
+        let text = ::ron::ser::to_string_pretty(exchange, ::ron::ser::PrettyConfig::default())?;
+        Ok(text.into_bytes())
     }
 
-    fn deserialize(&self, _bytes: &[u8]) -> eyre::Result<Exchange> {
-        todo!("RON deserialization")
+    fn deserialize(&self, bytes: &[u8]) -> eyre::Result<Exchange> {
+        Ok(::ron::de::from_bytes(bytes)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+    use crate::storage::exchange::tests::exchange_strategy;
+
+    proptest! {
+        #[test]
+        fn exchanges_round_trip(exchange in exchange_strategy()) {
+            let bytes = Ron.serialize(&exchange).unwrap();
+            prop_assert_eq!(Ron.deserialize(&bytes).unwrap(), exchange);
+        }
     }
 }
