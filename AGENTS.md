@@ -2,17 +2,17 @@
 
 ## Project Structure & Module Organization
 
-`erm` is a Rust 2024 single-binary record/replay HTTP proxy. The entry point and request flow live in `src/main.rs`. Supporting modules are split by responsibility: `src/cli.rs` defines Clap arguments, `src/ir.rs` contains serializable HTTP representations, `src/storage.rs` manages RON mock files and watching, and `src/matching.rs` selects recorded exchanges. Unit and property tests live beside the code under `#[cfg(test)]`; Proptest failure seeds are kept in `proptest-regressions/`. Architecture diagrams are `erm-diagram.drawio` and `erm-diagram.jpg`. Runtime recordings are written under `mocks/` and should not be committed.
+`erm` is a Rust 2024 single-binary record/replay HTTP proxy with two modes, `erm record` and `erm replay`. `src/main.rs` picks the mode. Supporting modules are split by responsibility: `src/cli.rs` defines Clap arguments, `src/record/` proxies and captures each exchange, `src/replay.rs` answers from recordings, `src/ir/` contains serializable HTTP representations, and `src/storage/` saves and loads exchange files (see `docs/storage/spec.md`). Unit and property tests live beside the code under `#[cfg(test)]`; `tests/` holds tests that run the `erm` binary and the NixOS VM test in `tests/integration/`. Proptest failure seeds are kept in `proptest-regressions/`. Architecture diagrams are `erm-diagram.drawio` and `erm-diagram.jpg`. Runtime recordings are written under `mocks/` and should not be committed.
 
 ## Build, Test, and Development Commands
 
 - `nix develop` enters the reproducible development shell with Rust, rust-analyzer, and Cargo tools.
-- `cargo run -- -d https://example.com` starts the proxy; `--mock-dir` defaults to `mocks` and `--port` to `4321`.
-- `cargo build --all-targets` compiles the binary and test targets.
-- `cargo test` runs all unit and Proptest tests; use `cargo test matching::` to narrow by name.
+- `cargo run -- record -d https://example.com` records through the proxy, and `cargo run -- replay` answers from the recordings. Each request needs an `x-erm-match` header that names its exchange. `--mock-dir` defaults to `mocks`, `--format` to `ron`, and `-p` to `4321`.
+- `cargo build --all-targets` compiles the binary and test targets; add `--no-default-features --features json` to check the JSON-only build.
+- `cargo test --all-features` runs every test with every format; use `cargo test record::` to narrow by name.
 - `cargo clippy --all-targets --all-features` checks common correctness and style issues.
 - `cargo fmt --check` verifies formatting. The stable toolchain may warn about an unstable rustfmt option while still succeeding.
-- `nix build` creates the static release package; `nix build .#dockerImage` creates the container image.
+- `nix build` creates the release package (`.#static` for a static one); `nix build .#dockerImage` creates the container image.
 
 ## Coding Style & Naming Conventions
 
@@ -20,7 +20,7 @@ Use standard Rust formatting with four-space indentation and run `cargo fmt`. `r
 
 ## Testing Guidelines
 
-Add focused tests in the module being changed. Use Proptest for serialization round trips and matching invariants, and preserve newly generated regression files. There is no enforced coverage threshold; cover success cases, malformed data, repeated headers, streaming frames, and filesystem watcher behavior where relevant. Run `cargo test` and Clippy before submitting.
+Add focused tests in the module being changed. Use Proptest for serialization round trips, and preserve newly generated regression files. There is no enforced coverage threshold; cover success cases, malformed data, repeated headers, and streaming frames where relevant, and name the storage spec scenario (Q1 to Q8) a test covers. Run `cargo test --all-features` and Clippy before submitting.
 
 ## Commit & Pull Request Guidelines
 

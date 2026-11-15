@@ -95,10 +95,13 @@ jobs:
       - *install-nix
       - *devshell-cache
       - *cargo-cache
-      - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo test
+      - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo test --all-features
+      # Storage spec Q8: a different set of format features builds with no change outside storage.
+      - run: nix develop --profile "$RUNNER_TEMP/dev-shell" --command cargo test --no-default-features --features json
 
-  windows-build:
-    name: cargo build --all-targets (${{ matrix.runner }})
+  # The storage spec requires every scenario to pass on Linux, macOS, and Windows.
+  test-other-os:
+    name: cargo test (${{ matrix.runner }})
     needs: [fmt, actionlint, clippy, test]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -107,14 +110,13 @@ jobs:
       matrix:
         runner:
           - windows-latest
+          - macos-latest
     steps:
       - *checkout
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup toolchain install
       - *cargo-cache
-      - name: Build on Windows
-        if: runner.os == 'Windows'
-        run: cargo build --all-targets
+      - run: cargo test --all-features
 
   macos-build:
     name: nix package (aarch64-darwin)
