@@ -66,16 +66,17 @@ impl IntoResponse for NotFound {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, time::Duration};
+    use std::{collections::HashMap, fs, path::Path, time::Duration};
 
     use http::{HeaderMap, HeaderValue, Request, header};
+    use tempfile::TempDir;
     use tokio::time::Instant;
     use tower::Service;
 
     use super::*;
     use crate::{
         ir::{ERMRequestParts, ERMResponseParts, FinalRequest, FinalResponse, VersionIR},
-        storage::Exchange,
+        storage::{Exchange, FormatKind, Recorder},
     };
 
     const MATCH: &str = "x-erm-match";
@@ -250,15 +251,102 @@ mod tests {
         );
     }
 
+    /// Every format compiled into this build.
+    fn formats() -> Vec<FormatKind> {
+        vec![
+            #[cfg(feature = "ron")]
+            FormatKind::Ron,
+            #[cfg(feature = "json")]
+            FormatKind::Json,
+        ]
+    }
+
+    /// Saves `exchanges` in order with the filesystem recorder and waits for the writer.
+    fn record(dir: &Path, format: FormatKind, exchanges: impl IntoIterator<Item = Exchange>) {
+        let (recorder, writer) = storage::recorder(dir, format).unwrap();
+        for exchange in exchanges {
+            recorder.save(exchange);
+        }
+        writer.finish();
+    }
+
+    fn file_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn id(value: &str) -> Id {
+        Id::parse(value.as_bytes()).unwrap()
+    }
+
+    fn q1_exchange() -> Exchange {
+        let mut exchange = exchange(
+            "q1",
+            &[("set-cookie", "first=1"), ("set-cookie", "second=2")],
+            &[
+                (b"\x00\xff\x80", Duration::from_millis(15)),
+                (b"\xfe", Duration::from_millis(1500)),
+            ],
+        );
+        exchange.request.body = exchange.response.body.clone();
+        exchange
+    }
+
+    #[test]
+    fn q1_find_returns_the_saved_exchange_in_every_field() {
+        for format in formats() {
+            let dir = TempDir::new().unwrap();
+            record(dir.path(), format, [q1_exchange()]);
+
+            let replayer = storage::replayer(dir.path(), format).unwrap();
+
+            assert_eq!(replayer.find(&id("q1")), Some(&q1_exchange()), "{format}");
+        }
+    }
+
+    #[test]
+    fn q2_saving_an_id_twice_keeps_only_the_second_exchange() {
+        let first = || exchange("login", &[], &[(b"first", Duration::ZERO)]);
+        let second = || exchange("login", &[], &[(b"second", Duration::ZERO)]);
+        for format in formats() {
+            let dir = TempDir::new().unwrap();
+            record(dir.path(), format, [first(), second()]);
+
+            let replayer = storage::replayer(dir.path(), format).unwrap();
+
+            assert_eq!(
+                file_names(dir.path()),
+                [format!("login.{format}")],
+                "{format}: one file holds the id"
+            );
+            assert_eq!(replayer.find(&id("login")), Some(&second()), "{format}");
+        }
+    }
+
+    #[test]
+    fn q3_a_partial_tmp_file_next_to_its_exchange_is_ignored() {
+        let login = || exchange("login", &[], &[(b"welcome", Duration::ZERO)]);
+        for format in formats() {
+            let dir = TempDir::new().unwrap();
+            record(dir.path(), format, [login()]);
+            let saved = fs::read(dir.path().join(format!("login.{format}"))).unwrap();
+            let partial = &saved[..saved.len() / 2];
+            fs::write(dir.path().join(format!("login.{format}.tmp")), partial).unwrap();
+
+            let replayer =
+                storage::replayer(dir.path(), format).expect("a .tmp file does not fail the load");
+
+            assert_eq!(replayer.find(&id("login")), Some(&login()), "{format}");
+        }
+    }
+
     #[cfg(feature = "ron")]
     #[test]
     fn a_file_with_an_invalid_status_or_header_fails_to_load() {
-        use std::fs;
-
-        use tempfile::TempDir;
-
-        use crate::storage::{FormatKind, Recorder};
-
         let cases = [
             ("status 42", "status: 200", "status: 42"),
             ("header name", r#"b"x-test""#, r#"b"x test""#),
