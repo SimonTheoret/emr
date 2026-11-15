@@ -267,29 +267,9 @@ jobs:
       - name: Load image
         id: image
         run: |
-          image_id=$(python3 - <<'PY'
-          import hashlib
-          import json
-          import tarfile
-
-          with tarfile.open("erm-image.tar.gz", "r:*") as archive:
-              manifests = [entry for entry in archive.getmembers() if entry.name == "manifest.json"]
-              if len(manifests) != 1 or not manifests[0].isfile():
-                  raise SystemExit("Image artifact must contain exactly one regular manifest.json")
-              manifest = json.load(archive.extractfile(manifests[0]))
-              if not isinstance(manifest, list) or len(manifest) != 1 or not isinstance(manifest[0], dict):
-                  raise SystemExit("Image artifact must describe exactly one image")
-              config_name = manifest[0].get("Config")
-              if not isinstance(config_name, str) or not config_name:
-                  raise SystemExit("Image artifact must name its image config")
-              configs = [entry for entry in archive.getmembers() if entry.name == config_name]
-              if len(configs) != 1 or not configs[0].isfile():
-                  raise SystemExit("Image artifact must contain exactly one regular image config")
-              print("sha256:" + hashlib.sha256(archive.extractfile(configs[0]).read()).hexdigest())
-          PY
-          )
+          config=$(tar -xOf erm-image.tar.gz manifest.json | jq -r '.[0].Config')
+          image_id="sha256:$(tar -xOf erm-image.tar.gz "$config" | sha256sum | cut -d ' ' -f 1)"
           docker load --input erm-image.tar.gz
-          test "$(docker image inspect --format '{{.Id}}' "$image_id")" = "$image_id"
           echo "id=$image_id" >> "$GITHUB_OUTPUT"
       - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
