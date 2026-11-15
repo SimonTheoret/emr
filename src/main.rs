@@ -7,9 +7,6 @@ mod proxy;
 mod record;
 mod replay;
 mod server;
-// TODO(sketch): drop this allow once `loader.rs` and `recorder.rs` land. Their stubs never
-// call `Format::serialize` or `Format::deserialize`, which `dead_code = "deny"` rejects.
-#[allow(dead_code)]
 mod storage;
 
 use crate::cli::{Cli, Mode};
