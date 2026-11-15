@@ -83,6 +83,7 @@ pub(crate) mod tests {
         (0_u16..1000).prop_map(|id| UriIR(format!("/resource/{id}?q={id}").parse().unwrap()))
     }
 
+    #[cfg(feature = "ron")]
     #[test]
     fn serializes_as_the_uri_string() {
         let uri = UriIR("/resource?q=value".parse().unwrap());
@@ -90,6 +91,7 @@ pub(crate) mod tests {
         assert_eq!(ron::to_string(&uri).unwrap(), r#""/resource?q=value""#);
     }
 
+    #[cfg(feature = "ron")]
     #[test]
     fn deserializes_a_valid_uri_string() {
         let uri: UriIR = ron::from_str(r#""https://example.test/resource?q=value""#).unwrap();
@@ -100,6 +102,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg(feature = "ron")]
     #[test]
     fn rejects_an_invalid_uri_string() {
         let result = ron::from_str::<UriIR>(r#""not a valid uri""#);
