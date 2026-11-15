@@ -71,6 +71,14 @@
             inherit pkgs;
             erm = ermPackage;
           };
+          lifecycleTest = import ./tests/integration/lifecycle.nix {
+            inherit pkgs;
+            erm = ermPackage;
+          };
+          lifecycleTestStatic = import ./tests/integration/lifecycle.nix {
+            inherit pkgs;
+            erm = ermPackageStatic;
+          };
           integrationTestStatic = import ./tests/integration {
             inherit pkgs;
             erm = ermPackageStatic;
@@ -122,6 +130,8 @@
           checks = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             integration = integrationTest;
             integration-static = integrationTestStatic;
+            lifecycle = lifecycleTest;
+            lifecycle-static = lifecycleTestStatic;
           };
 
           apps = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

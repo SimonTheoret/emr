@@ -205,7 +205,7 @@ jobs:
       fail-fast: false
       matrix:
         system: [x86_64-linux, aarch64-linux]
-        check: [integration, integration-static]
+        check: [integration, integration-static, lifecycle, lifecycle-static]
         include:
           - system: x86_64-linux
             runner: ubuntu-26.04
@@ -214,6 +214,10 @@ jobs:
           - check: integration
             package: default
           - check: integration-static
+            package: static
+          - check: lifecycle
+            package: default
+          - check: lifecycle-static
             package: static
     steps:
       - *checkout

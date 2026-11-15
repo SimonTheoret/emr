@@ -20,8 +20,8 @@ use http_body::{Body, Frame, SizeHint};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    ir::{ERMRequestParts, TimedFrame},
-    storage::{Id, Recorder},
+    ir::{ERMRequestParts, ERMResponseParts, FinalRequest, FinalResponse, TimedFrame, UrlIR},
+    storage::{Exchange, Id, Recorder},
 };
 
 /// The only path to the `Recorder`. Every clone keeps `Drained::wait` pending, and every
@@ -91,26 +91,42 @@ impl Capture {
     /// Taps the upstream response body. The exchange is saved once both bodies are read to
     /// their end, in whichever order they finish.
     pub(super) fn respond(self, upstream: reqwest::Response) -> http::Response<Tap<reqwest::Body>> {
-        // TODO:
-        //   let url = UrlIR(upstream.url().clone());
-        //   let (head, body) = http::Response::from(upstream).into_parts();
-        //   let response = ERMResponseParts { url, version: head.version.into(),
-        //       headers: head.headers.clone().into(), status: head.status.into() };
-        //   let (body, response_body) = Tap::new(body);
-        //   let Self { saver, id, request, request_body } = self;
-        //   tokio::spawn(async move {
-        //       // Fails fast on the first receiver whose tap was dropped early or saw an error.
-        //       let Ok((request_frames, response_frames)) =
-        //           futures::future::try_join(request_body, response_body).await
-        //       else { return };
-        //       saver.recorder.save(Exchange {
-        //           id,
-        //           request: FinalRequest { parts: request, body: request_frames },
-        //           response: FinalResponse { parts: response, body: response_frames },
-        //       });
-        //   });
-        //   http::Response::from_parts(head, body)
-        todo!("tap {} for {}", upstream.url(), self.id)
+        let url = UrlIR(upstream.url().clone());
+        let (head, body) = http::Response::from(upstream).into_parts();
+        let response = ERMResponseParts {
+            url,
+            version: head.version.into(),
+            headers: head.headers.clone().into(),
+            status: head.status.into(),
+        };
+        let (body, response_body) = Tap::new(body);
+        let Self {
+            saver,
+            id,
+            request,
+            request_body,
+        } = self;
+        tokio::spawn(async move {
+            let Ok((request_frames, response_frames)) =
+                futures::future::try_join(request_body, response_body).await
+            else {
+                return;
+            };
+            saver.recorder.save(Exchange {
+                id,
+                request: FinalRequest {
+                    parts: request,
+                    body: request_frames,
+                },
+                response: FinalResponse {
+                    parts: response,
+                    body: response_frames,
+                },
+            });
+            // Capture the whole Saver so its drain token lives until the save is queued.
+            drop(saver);
+        });
+        http::Response::from_parts(head, body)
     }
 }
 
@@ -161,25 +177,24 @@ impl<B: Body<Data = Bytes> + Unpin> Body for Tap<B> {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, B::Error>>> {
-        // TODO:
-        //   match ready!(Pin::new(&mut self.inner).poll_frame(cx)) {
-        //       Some(Ok(frame)) => {
-        //           if let (Some(data), Some(capturing)) = (frame.data_ref(), &mut self.capturing) {
-        //               capturing.push(data.clone());
-        //           }
-        //           Poll::Ready(Some(Ok(frame)))
-        //       }
-        //       Some(Err(error)) => {
-        //           self.capturing = None;
-        //           Poll::Ready(Some(Err(error)))
-        //       }
-        //       None => {
-        //           if let Some(capturing) = self.capturing.take() { capturing.finish() }
-        //           Poll::Ready(None)
-        //       }
-        //   }
-        let _ = (&mut self.inner, cx);
-        todo!("pass the frame through and record its data")
+        match std::task::ready!(Pin::new(&mut self.inner).poll_frame(cx)) {
+            Some(Ok(frame)) => {
+                if let (Some(data), Some(capturing)) = (frame.data_ref(), &mut self.capturing) {
+                    capturing.push(data.clone());
+                }
+                Poll::Ready(Some(Ok(frame)))
+            }
+            Some(Err(error)) => {
+                self.capturing = None;
+                Poll::Ready(Some(Err(error)))
+            }
+            None => {
+                if let Some(capturing) = self.capturing.take() {
+                    capturing.finish();
+                }
+                Poll::Ready(None)
+            }
+        }
     }
 
     fn is_end_stream(&self) -> bool {
