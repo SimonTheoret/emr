@@ -23,6 +23,9 @@ mod ir;
 mod legacy_storage;
 pub mod matching;
 mod proxy;
+// The record mode starts using it later in this stack.
+#[allow(dead_code)]
+mod record;
 mod server;
 // The record and replay modes start using it later in this stack.
 #[allow(dead_code, unused_imports)]

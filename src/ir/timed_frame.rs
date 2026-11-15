@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 pub struct TimedFrame {
     /// The content of the frame.
     pub content: Bytes,
-    /// Time since the last frame.
+    /// Time since the previous frame. For the first frame, time since the head arrived, so
+    /// replay reproduces a slow first byte.
     pub tslf: Duration,
 }
 

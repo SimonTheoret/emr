@@ -1,4 +1,5 @@
 use axum::extract::Request;
+use http::request::Parts;
 use uuid::Uuid;
 
 use super::{HeadersIR, MethodIR, UriIR, VersionIR};
@@ -20,6 +21,20 @@ impl ERMRequestParts {
             headers: req.headers().clone().into(),
             uri: req.uri().clone().into(),
             id,
+        }
+    }
+}
+
+/// Records the request as it arrived, before `sanitize_headers` touches the forwarded copy.
+impl From<&Parts> for ERMRequestParts {
+    fn from(parts: &Parts) -> Self {
+        Self {
+            method: parts.method.clone().into(),
+            version: parts.version.into(),
+            headers: parts.headers.clone().into(),
+            uri: parts.uri.clone().into(),
+            // The record mode has no use for the old recorder's UUID, which goes away with it.
+            id: Uuid::nil(),
         }
     }
 }
