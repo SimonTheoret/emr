@@ -16,6 +16,8 @@ pub struct Cli {
 pub enum Mode {
     /// Proxy every request to the destination and record each exchange.
     Record(RecordArgs),
+    /// Answer every request from the recorded exchanges, without contacting an upstream.
+    Replay(ServeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -26,7 +28,7 @@ pub struct RecordArgs {
     pub serve: ServeArgs,
 }
 
-/// Where the exchanges live, their format, and the port.
+/// What both modes share: where the exchanges live, their format, and the port.
 #[derive(Debug, Args)]
 pub struct ServeArgs {
     #[arg(short, long, default_value = "mocks")]

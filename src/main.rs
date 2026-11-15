@@ -5,9 +5,8 @@ mod ir;
 mod match_id;
 mod proxy;
 mod record;
+mod replay;
 mod server;
-// The replay mode starts using its replayer later in this stack.
-#[allow(dead_code)]
 mod storage;
 
 use crate::cli::{Cli, Mode};
@@ -17,5 +16,6 @@ async fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt().init();
     match Cli::parse().mode {
         Mode::Record(args) => record::run(args).await,
+        Mode::Replay(args) => replay::run(args).await,
     }
 }
